@@ -1,0 +1,6 @@
+@MesWorklog_HostAddress = http://localhost:5201
+
+GET {{MesWorklog_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
