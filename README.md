@@ -6,10 +6,10 @@ MES 기능중에서 작업자별로 업무 시작/일시정지/재개/종료 기
 
 ## 기술 스택
 
-Language : C# 
-Framework : .NET 10, ASP.NET Core Web API
-ORM : Entity Framework Core + Pomelo.EntityFrameworkCore.MySql
-DB : MySQL
+Language : C#  
+Framework : .NET 10, ASP.NET Core Web API  
+ORM : Entity Framework Core + Pomelo.EntityFrameworkCore.MySql  
+DB : MySQL  
 
 ## 실행 화면
 
