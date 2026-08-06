@@ -1,7 +1,7 @@
 # MES Worklog
 
 스마트팩토리 구축 회사에서의 실무 경험을 바탕으로, 고객사가 중요하게 여겼던 기능을 재구현하는 프로젝트입니다.
-MES 기능중에서 작업자별로 업무 시작/일시정지/재개/종료 기능을 웹에서 구현해서 해당 시작/일시정지/재개/종료 시간을 토대로 가동율을 그래프로 시각화를 구현하는 프로젝트입니다.
+MES 기능중에서 작업자별로 업무 시작/일시정지/재개/종료 기능을 웹에서 구현해서 해당 시각들을 토대로 OEE 시간가동율을 그래프로 시각화를 구현하는 프로젝트입니다.
 
 
 ## 기술 스택
@@ -70,19 +70,21 @@ dotnet run
 
 ## 도메인 모델 (ERD)
 
-핵심 테이블 4개로 구성됩니다.
-
-- *Process(공정)**: id, name, lineName
-- **Worker(작업자)**: id, name, processId(FK)
-- **WorkOrder(작업지시)**: id, processId(FK), orderDate, plannedStart, plannedEnd, targetQty
-- **WorkLog(작업이력, 트랜잭션 테이블)**: id, workOrderId(FK), workerId(FK), status(WAITING/IN_PROGRESS/PAUSED/COMPLETED), startTime, endTime, pausedAt, totalPausedSeconds, actualQty
+마스터데이터 5개 + 조인 2개 + 트랜잭션 3개로 구성됩니다.
 
 ```
-Process 1:N Worker
-Process 1:N WorkOrder
-Worker   1:N WorkLog
-WorkOrder 1:N WorkLog
+Line(라인)    ──N:M──▶ Process(공정)     ※ 조인: LineProcess
+Process(공정) ──N:M──▶ Worker(작업자)    ※ 조인: WorkerProcess
+Equipment(설비) — 어느 공정에도 종속되지 않는 독립 테이블
+
+WorkOrder(작업지시) ──N:1──▶ Process (필수)
+                   ──N:1──▶ Line (필수)
+                   ──N:1──▶ Equipment (nullable, 수작업 가능)
+                   ──1:N──▶ WorkLog(작업이력) ──N:1──▶ Worker
+                                              ──1:N──▶ WorkLogPause ──N:1──▶ PauseReason
+
 ```
+
 
 `WorkLog`가 `Worker`-`WorkOrder` 간 N:M 관계를 풀어주는 중간 테이블 역할을 합니다.
 
@@ -95,20 +97,28 @@ WorkOrder 1:N WorkLog
 - 날짜: 캘린더 UI
 - 시간: 시(0-23) + 분(10분 단위: 00/10/20/30/40/50) 선택
 
-### 순수 작업시간 계산
+### 가동률(OEE Availability) 계산
 
 ```
-순수 작업시간 = 전체 경과시간 - 누적 일시정지시간
+조업시간   = EndTime - StartTime
+계획정지   = Σ(WorkLogPause 중 category=PLANNED)     // 식사, 정기점검 등
+비가동     = Σ(WorkLogPause 중 category=UNPLANNED)   // 고장, 자재대기 등
+가동시간   = 조업시간 - 계획정지
+실가동시간 = 가동시간 - 비가동
+
+가동률(%) = Σ실가동시간 / Σ조업시간 × 100
 ```
 
 
 ### 서버 검증 규칙
 
 - 모든 시각은 미래일 수 없음
-- `pausedAt > startTime`
+- `pausedAt > 직전 시작/재개 시각` (정지 구간 겹침 방지)
 - `resumedAt > pausedAt`
 - `endTime > 마지막 기록 시각` (일시정지 중이면 `pausedAt`, 아니면 `startTime`)
 - 위반 시 409 Conflict + 에러 메시지 응답
+- **작업 상태 변경시 방지**: `Start`는 `WAITING`, `Pause`는 `IN_PROGRESS`, `Resume`은 `PAUSED`, `Complete`는 `IN_PROGRESS`일 때만 허용
+- **작업자 중복 시작 방지**: 이미 활성(`IN_PROGRESS`/`PAUSED`) 건이 있는 작업자는 새로 시작 불가
 
 ### 알려진 한계
 
@@ -131,9 +141,10 @@ WorkOrder 1:N WorkLog
 
 ## 화면 구성
 
-1. **현장 작업 화면**: 공정/작업자 선택 → 오늘의 작업지시 카드 목록 → 상태별 버튼(시작/일시정지/재개/종료) → 클릭 시 시간선택 Dialog → 완료는 시간 확정 후 실적수량 입력 2단계
-2. **대시보드**: 요약 카드 3개(작업 인원/완료 건수/평균 가동률) + 작업자별 타임라인(간트 스타일 바 차트, 진행중=파랑/일시정지=주황/완료=초록)
-3. **상세 조회**: 작업이력 ID로 조회, 계획 대비 실제 시간, 누적 정지시간, 순수 작업시간 표시
+1. **현장 작업 화면**: 이어하기 체크박스(끄면 신규 입력폼 — 라인→공정→작업자 캐스케이딩 셀렉트, 켜면 미완료 작업지시 목록에서 선택) → 시작/일시정지(사유 선택)/재개/완료(실적수량 입력 2단계). 오입력 데이터는 삭제 가능
+2. **대시보드**: 기간(일/주/월/연) × 그룹(작업자/공정/라인/설비) 가동률 그래프. 공정·라인은 세로 막대, 작업자·설비는 가로 막대 + 스크롤
+3. **상세 조회**: 실제 시작/종료, 정지 이력(사유별), 실가동시간, 가동률 표시. 라인/공정/설비 수정 가능
+4. **마스터데이터 관리**: `[라인|공정|작업자|설비]` 탭, DataTable + Dialog CRUD
 
 ## 진행 상태
 
