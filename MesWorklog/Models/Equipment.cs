@@ -1,6 +1,6 @@
 ﻿namespace MesWorklog.Models
 {
-    public class Line
+    public class Equipment
     {
         // 자동 pk auto-incremaent
         // EF core C# 자동 프로퍼티
@@ -8,8 +8,7 @@
 
         // 컴파일시 경고방지를 위해 default! 사용
         public string Name { get; set; } = default!;
-
-        // 라인에 속한 공정목록 
-        public ICollection<LineProcess> LineProcesses { get; set; } = new List<LineProcess>();
+        // 이 설비를 사용한 작업지시 목록
+        public ICollection<WorkOrder> WorkOrders { get; set; } = new List<WorkOrder>();
     }
 }

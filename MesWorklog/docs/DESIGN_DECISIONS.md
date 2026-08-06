@@ -1,0 +1,213 @@
+# MES Worklog — 설계 결정 문서
+
+이 문서는 최종 확정된 설계와, 그 설계에 도달하기까지의 주요 의사결정 이력을 함께 담습니다.
+"왜 이렇게 설계했는가"를 나중에(면접 등에서) 설명할 수 있도록, 버려진 대안과 그 이유도 남겨둡니다.
+
+---
+
+## 1. 최종 ERD
+
+```
+Line(라인)    ──N:M──▶ Process(공정)     ※ 조인 엔티티: LineProcess   (§4-8)
+Process(공정) ──N:M──▶ Worker(작업자)    ※ 조인 엔티티: WorkerProcess (§4-7)
+
+WorkOrder(작업지시) ──N:1──▶ Process (필수)
+                   ──N:1──▶ Line (필수 — Process가 여러 라인에 걸칠 수 있어 파생 불가, §4-8)
+                   ──N:1──▶ Equipment (nullable, 수작업 가능, Process와 무관한 독립 엔티티)
+                   ──1:N──▶ WorkLog(작업이력) ──N:1──▶ Worker
+                                              ──1:N──▶ WorkLogPause ──N:1──▶ PauseReason
+```
+
+## 2. 핵심 엔티티 요약
+
+| 엔티티 | 역할 | 비고 |
+|---|---|---|
+| `Line` | 생산 라인 | |
+| `Process` | 공정 | `Line`과 N:M (§4-8) — `LineId` FK 없음 |
+| `LineProcess` | Line↔Process 조인 | `(LineId, ProcessId)` 유니크 인덱스 |
+| `Worker` | 작업자 | `Process`와 N:M (§4-7) — `ProcessId` FK 없음 |
+| `WorkerProcess` | Worker↔Process 조인 | `(WorkerId, ProcessId)` 유니크 인덱스. `IsPrimary`(주공정) 컬럼은 검토 후 폐기(§4-7) |
+| `Equipment` | 설비 | **Process에 소속되지 않는 독립 마스터 데이터** (§4-2 참고) |
+| `WorkOrder` | 작업지시 | "시작" 시점에 자동 생성됨(§4-4). `ProcessId`+`LineId`+`EquipmentId?`+`TargetQty`+`CompletedAt` 보유. `PlannedStart`/`PlannedEnd`는 폐기(§4-10) |
+| `WorkLog` | 작업이력(실적 트랜잭션) | `WorkOrderId` 필수 FK 1개만 가짐, 완료 시 캐시 컬럼 3개 확정 |
+| `WorkLogPause` | 정지 이력(1건당 1행) | `WorkLog` 1:N |
+| `PauseReason` | 정지사유 코드 | 웹 등록 없음, DB 직접 관리, `Category`(PLANNED/UNPLANNED) 보유 |
+
+## 3. 핵심 비즈니스 로직
+
+### 3-1. 시간 입력 방식
+작업자가 시작/일시정지/재개/종료 각 시점의 시각을 **직접 선택**(10분 단위)해서 서버에 전달. 서버 자동 타임스탬프 방식은 "제때 못 누르면 부정확해진다"는 이유로 폐기.
+
+### 3-2. 시간 기준 — KST 고정
+`DateTime.Now`(서버 로컬 시간)를 직접 쓰면 AWS 배포 시(EC2 기본 UTC) 한국시간 오전 9시 이후 입력이 전부 "미래 시각"으로 거부되는 문제가 있어, `Common/KoreaTime.Now`(`TimeZoneInfo.ConvertTimeFromUtc` 기반)로 시간 기준을 단일화. `WorkLog`의 모든 상태 전이 메서드는 `now`를 파라미터로 받아 호출부(`KoreaTime.Now`)에서 주입 — 테스트에서 시계를 고정할 수 있게 하는 효과도 겸함.
+
+### 3-3. 서버 검증 규칙
+- 모든 시각은 미래 불가 (`InvalidTimeInputException`)
+- `pausedAt > startTime`, `resumedAt > pausedAt`(직전 재개시각 기준, 정지구간 겹침도 방지), `endTime > 마지막 기록 시각`
+- **상태 전이 가드**(`InvalidWorkLogStateException`): `Start`는 `WAITING`, `Pause`는 `IN_PROGRESS`, `Resume`은 `PAUSED`, **`Complete`는 `IN_PROGRESS`일 때만** 허용. 가드가 없으면 연속 `Pause` 호출 시 "열린 정지 이력"이 2개 이상 생겨 시간 계산이 무한정 커지는 버그가 발생함(§8-2). `Complete`를 `PAUSED`에서 제외한 이유는 §4-9 참고
+- **작업자 중복 시작 방지**: 서비스 계층에서 시작 시 해당 작업자에게 이미 `IN_PROGRESS`/`PAUSED` 건이 있으면 거부(§8-5)
+- **라인-공정 조합 검증**(`InvalidLineProcessCombinationException`): 요청으로 들어온 `lineId`+`processId`가 `LineProcess`에 실제 존재하는 조합인지 확인. 프론트가 라인→공정 캐스케이딩 셀렉트로 1차 차단하지만, Swagger 직접 호출이나 캐시된 낡은 목록은 막지 못하므로 서버가 최종 방어선(§4-8)
+- 위반 시 모두 409 Conflict + 에러 메시지 응답
+
+**클라이언트는 신뢰하지 않는다** — 위 검증들은 프론트에서도 대부분 버튼 비활성화/alert로 1차 차단하지만, 그건 사용자 경험용이고 데이터 정합성 보장은 서버 몫이라는 원칙을 일관되게 적용했다.
+
+### 3-4. OEE 기반 가동률(시간가동률/Availability) 계산
+```
+조업시간   = WorkLog.EndTime(또는 진행중이면 now) - StartTime
+계획정지   = Σ(WorkLogPause 중 Category=PLANNED)
+비가동     = Σ(WorkLogPause 중 Category=UNPLANNED)
+가동시간   = 조업시간 - 계획정지
+실가동시간 = 가동시간 - 비가동
+가동률(%)  = Σ실가동시간 / Σ조업시간 × 100   (그룹 내 개별 비율의 평균이 아니라, 분자/분모를 각각 합산 후 나눔)
+```
+- **성능로스(속도저하)·품질로스(불량/재작업)는 스코프 제외** — 표준 사이클타임, 양품/불량 수량 분리 등 지금 도메인에 없는 데이터가 필요해서 의도적으로 뺌 (§4-6)
+- 비조업시간(공휴일/연차/교대공백 등)은 `PauseReason`에 넣지 않음 — `WorkLog`가 존재하는 구간 자체가 조업시간을 의미하므로, 그 밖의 시간은 계산에 애초에 안 들어감(명시적으로 빼는 게 아니라 자연히 제외됨)
+
+### 3-5. 완료 시점 캐싱
+`WorkLog.Complete()` 호출 시 `ElapsedMinutes`(조업시간)/`OperatingMinutes`(가동시간)/`NetOperatingMinutes`(실가동시간) 3개를 분 단위로 계산해 저장(그 이후 절대 안 바뀜). 대시보드 집계는 완료 건(캐시값 SUM) + 진행중 건(NOW() 기반 SQL 동적 계산)을 각각 쿼리한 뒤 로직단에서 병합. 병합 로직(`EfficiencyCalculator.Merge`)은 DB 의존성 없는 순수 함수로 분리해 단위테스트 가능하게 함.
+
+### 3-6. 집계 귀속 기준(야간교대) — 의도된 결정
+대시보드 집계는 `WorkLog.StartTime`이 조회 범위(일/주/월/연)에 속하는지로만 판단한다. 즉 **자정을 넘기는 야간조는 개시일(StartTime의 날짜)에 전부 귀속**된다(예: 8/4 22시 시작 ~ 8/5 06시 종료 건은 "8/4" 조회 시 표시됨). 이는 부수 효과가 아니라 의도된 결정이며, 제조업의 "작업 개시일/생산일자" 개념 및 교대조 단위 집계 관행과 일치한다. 화면에는 "작업 시작 시각 기준 집계" 안내 문구를 표시한다.
+
+## 4. 주요 설계 변경 이력
+
+### 4-1. 원래 4개 엔티티 → 확장
+최초 설계(Java 프로토타입 인수인계 기준)는 `Process`/`Worker`/`WorkOrder`/`WorkLog` 4개뿐이었음. 이후 `Line`(원래 `Process.LineName` 문자열이었음), `Equipment`, `PauseReason`, `WorkLogPause`가 순차적으로 추가됨.
+
+### 4-2. Equipment — Process 종속 설계의 오류 발견/수정
+처음엔 `Equipment.ProcessId`로 특정 공정에 종속시켰으나, "같은 설비를 여러 공정이 공유하면 데이터가 모순된다"는 문제를 스스로 발견. → `Equipment`를 완전 독립 엔티티로 변경(어느 공정과도 FK 관계 없음). `Process↔Equipment` N:M 매핑 테이블(사용 가능 조합 제한)도 검토했으나, 지금 화면 기준으로는 문제없다고 판단해 **채택하지 않음**(추후 필요시 도입 가능).
+
+### 4-3. 정지사유 — 필드 1개 → 이력 테이블
+`WorkLog.PauseReasonId` 필드 1개로 시작했으나, "정지가 여러 번 발생하면 마지막 사유만 남는다"는 한계 발견 → `WorkLogPause`(1:N 이력 테이블)로 승격. `PauseReason`은 계획정지/비가동 2개 카테고리만 두고, "비조업시간"은 카테고리에서 제외(WorkLog 존재 자체가 조업시간을 전제하므로 범주 오류라고 판단).
+
+### 4-4. WorkOrder — 6차례 설계 반복
+1. 원래 설계: 작업지시가 미리 등록되어 있다고 가정(계획 대비 실적 비교 화면 포함)
+2. "작업지시 등록 기능이 없는데 계획 대비 비교가 의미 있냐"는 문제 제기 → WorkOrder 삭제 검토
+3. WorkOrder 삭제 → 필드를 WorkLog로 흡수(1안)
+4. "나중에 확장 가능성 남겨야" → WorkOrder 유지하되 WorkLog와의 연결을 선택사항으로(2안)
+5. "데이터가 여러 곳에 중복되면 나중에 꼬인다" → **최종: WorkOrder가 모든 계획 데이터를 계속 소유, WorkLog는 WorkOrderId 하나로만 참조.** 대신 "시작" 시점에 WorkOrder+WorkLog를 한 트랜잭션으로 자동 생성(계획=시작시각과 동일하게 기록, 향후 실제 사전등록 기능이 생기면 자동생성 로직만 교체하면 됨 — 스키마·다른 로직 변경 불필요)
+6. "동시/순차 작업자가 각자 다른 WorkOrder를 만들어버리는" 문제 발견 → "이어하기" 체크박스 + `WorkOrder.CompletedAt`(누적 실적이 목표 도달 시 기록) 추가
+
+이 반복 과정 자체가 "실제로 데이터 정합성 문제를 스스로 찾아내고 고친" 사례라 면접 답변으로 활용 가능.
+
+### 4-5. 가동률 계산 — 표준근무시간 상수 → WorkLog 자체 기반
+초기엔 "표준근무시간(예: 8시간) × 인원수"라는 외부 기준값으로 분모를 계산하려 했으나, 이 값이 도메인에 없다는 문제로 폐기. → **각 WorkLog 자신의 시작~종료 구간을 분모로 삼는 상향식(bottom-up) 계산**으로 전환(외부 상수 불필요, 결근자는 자동으로 계산에서 빠짐, 설비 기준에도 자연스러움).
+
+### 4-6. 스코프 결정 — 의도적으로 포함하지 않은 것들
+- **성능로스/품질로스**: 표준 사이클타임, 양품/불량 수량 분리가 필요해 제외. Availability(시간가동률)만 구현.
+- **동시성(레이스 컨디션)**: `WorkOrder.CompletedAt` 판정 시 두 완료 요청이 거의 동시에 들어오는 경합은 낙관적 락 등으로 해결 가능하나 미구현.
+- **Process↔Equipment N:M 매핑**: 검토했으나 현재 화면 기준 불필요 판단. (2026-08-06 재검토 — 라인/공정/작업자가 캐스케이딩으로 좁혀지는데 설비만 전체 목록이 뜨는 UI 불일치가 생겼으나, 조인 엔티티를 넷째까지 늘릴 만한 이득은 아직 없다고 보아 **여전히 미채택**.)
+- **`WorkOrder.LineId` 오선택 탐지**: 작업자가 라인을 잘못 골라도 시스템은 알 수 없음(§4-8). 정정은 작업지시 수정 화면으로 처리.
+- **비조업시간(휴가/공휴일) 관리**: 근태 관리 영역으로 판단, 스코프 제외.
+- **설비 동시 사용 검증**: 같은 작업지시를 여러 작업자가 병렬 수행하는 것은 정상 시나리오(허용)이지만, 서로 다른 작업지시가 같은 설비를 동시에 점유하는 것은 물리적으로 불가능함에도 미차단. 검증 로직 추가는 스코프 여유에 따라 결정.
+
+### 4-7. Worker↔Process — 1:N → N:M
+
+`Worker.ProcessId` FK 하나로 "작업자는 한 공정에만 속한다"고 가정했으나, **한 작업자가 A공정·B공정을 오가며 작업하는 경우**가 실제로 존재한다는 문제를 발견. §4-2(Equipment)와 동일한 유형의 모델링 오류였다.
+
+단 Equipment와 달리 FK를 그냥 제거할 수는 없었다 — `GET /api/workers?processId=`(공정 선택 시 해당 작업자만 표시)라는 화면 요구사항이 이미 있어서, 관계 자체는 유지하되 **N:M으로 승격**해야 했다. 조인 방식은 `WorkLogPause`(§4-3)와 같은 **명시적 조인 엔티티**(`WorkerProcess`)를 택했다. EF Core의 암시적 다대다(skip navigation)를 쓰면 조인 테이블이 숨겨져서 나중에 컬럼을 못 붙이기 때문.
+
+처음엔 `IsPrimary`(주공정 여부) 컬럼을 함께 두려 했으나 **폐기**했다. 대시보드 `groupBy=process`는 "실제로 작업한 공정"(`WorkOrder.ProcessId`)으로 묶으므로 작업자의 주공정을 읽지 않고, 이 값을 표시하는 화면도 없었다. 반면 비용은 실재했다 — "작업자당 `IsPrimary=true`는 최대 1개" 서비스 검증, 마스터데이터 화면의 라디오 버튼, "주공정 배정을 삭제하면?" 엣지케이스. **소비처 0, 비용 3개**라 판단해 뺐다(필요해지면 `bool` 컬럼 추가는 언제든 쉬움).
+
+### 4-8. Line↔Process — 1:N → N:M, 그리고 WorkOrder.LineId 추가
+
+§4-7 직후 **"A라인과 B라인이 물리적으로 같은 공정/설비를 공유하는 경우"** 도 있다는 문제를 발견 → `Process.LineId`를 제거하고 `LineProcess` 조인 엔티티로 N:M 전환.
+
+이 변경은 **연쇄 문제**를 낳았다. 기존에는 `WorkLog → WorkOrder → Process.LineId → Line` 체인으로 라인이 항상 파생됐지만, 공정이 두 라인에 동시에 걸리면 "이번 작업지시가 어느 라인에서 실행됐는지"를 `Process`만으로 특정할 수 없다. 대시보드 `groupBy=line` 집계가 성립하지 않는 것. → **`WorkOrder`에 `LineId` 필수 FK를 추가**해 실행 라인을 명시적으로 기록하는 것으로 해결.
+
+**부작용(알려진 한계)**: 라인이 파생값에서 사용자 입력값이 되면서, **작업자가 라인을 잘못 골라도 시스템이 탐지할 수 없게 됐다.** `lineId`와 `processId` 둘 다 유효하고 조합도 유효하므로 어떤 검증으로도 못 잡는다. 다만 노출 범위는 좁다 — 라인→공정 캐스케이딩 셀렉트 때문에 라인을 잘못 고르면 원하는 공정이 목록에 안 떠서 사용자가 스스로 알아채고, **실제로 조용히 잘못 저장되는 건 여러 라인이 공유하는 공정에 한정**된다. 대응은 검증이 아니라 정정 경로로 잡았다(§4-9의 작업지시 수정 화면).
+
+### 4-9. Complete 상태 가드 축소 — 가동률이 부풀려지던 실제 버그
+
+`Complete()`가 `IN_PROGRESS`/`PAUSED` 양쪽에서 허용됐는데, `PAUSED`에서 바로 완료하면 **열린 정지**(`ResumedAt == null`)가 남는다. 이 구간은 계획정지/비가동 합산에서는 `ResumedAt.HasValue` 조건에 걸려 제외되면서, `ElapsedMinutes`(= 종료 − 시작)에는 그대로 포함된다.
+
+```
+09:00 시작 → 10:00 정지(설비 고장) → 재개 없이 12:00 완료
+ElapsedMinutes      = 180
+unplannedPause      = 0     ← 열린 정지라 합산에서 제외됨
+NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 33%)
+```
+
+**정지 사유를 성실히 기록할수록 가동률이 100%로 나오는**, 시스템 목적과 정반대로 동작하는 버그였다.
+
+수정은 "열린 정지를 종료시각으로 닫아준다"는 예외 처리 대신 **상태 가드를 `IN_PROGRESS`로 좁히는** 쪽을 택했다. `Resume()`이 항상 정지를 닫고 상태를 바꾸므로 "`IN_PROGRESS`에는 열린 정지가 존재하지 않는다"는 **불변식**이 성립하고, 그 결과 이 계산 오류가 구조적으로 발생 불가능해진다. 부수적으로 `Complete()` 내부의 `lastRecordedAt` 삼항 분기도 도달 불가가 되어 제거됐다. 프론트는 `Paused` 동안 완료 버튼을 비활성화하고 "정지 중입니다. 재개 후 완료해주세요" alert로 1차 안내한다.
+
+**작업지시 수정 화면 추가**: §4-8의 라인 오선택을 정정할 수단으로 상세조회 화면을 읽기 전용에서 라인/공정/설비 수정 가능으로 확장(`PATCH /api/work-orders/{id}`). 안전한 이유는 `WorkLog`의 캐시 컬럼 3개가 전부 *시간* 기반이라 공정이 바뀌어도 재계산이 불필요하고, 대시보드는 조회 시점에 `WorkOrder`를 읽기 때문. 공정을 바꾸면 기록된 작업자가 새 공정 소속이 아닐 수 있으나, 이를 막으면 정작 정정이 필요한 상황에서 정정이 불가능해지므로 **의도적으로 허용**한다.
+
+### 4-10. PlannedStart / PlannedEnd 폐기
+
+`WorkOrder`의 계획시각 두 필드를 제거했다. `PlannedEnd`는 아무 로직도 채우지 않아 항상 `null`이었고, `PlannedStart`는 시작 시점에 실제 시작시각과 **동일한 값**으로 자동 기록돼 정보량이 0이었다. §6-3에서 상세조회 화면을 "계획 대비 비교 없음"으로 확정한 이상 읽는 곳도 없었다. 값이 없는 것보다 나쁜 건 "계획"이라는 이름 때문에 읽는 사람이 계획 데이터가 있다고 오해하는 것이라 판단해 스키마에서 제거.
+
+`WorkOrder.CompletedAt`은 **유지**한다. 이름이 비슷해 함께 폐기 대상으로 오인했으나, 이어하기 기능(`GET /api/work-orders/open`)이 `CompletedAt == null`로 미완료 작업지시를 걸러내는 기준이라 제거하면 완료된 작업지시가 이어하기 목록에 계속 남는다.
+
+### 4-11. 조인 테이블 갱신 — diff 동기화
+
+마스터데이터 화면에서 멀티셀렉트로 조합을 수정할 때, "기존 행 전부 삭제 후 재삽입" 대신 **diff 방식**을 쓴다. 프론트가 체크된 id 목록 전체를 보내면 백엔드가 `INSERT 대상 = 요청 − 기존`, `DELETE 대상 = 기존 − 요청`을 계산해 변경분만 반영한다. 안 바뀐 행의 Id가 보존되고 불필요한 쓰기가 없다. 판단 로직은 `JoinTableSync.Diff()` 순수 함수로 분리해 DB 없이 단위테스트 가능하게 했다(`EfficiencyCalculator.Merge`, `LineProcessValidator.IsValidCombination`과 같은 패턴).
+
+조인 테이블의 유니크 인덱스는 이 로직과 **별개로 유지**한다. 관리자 두 명이 동시에 저장하면 양쪽 모두 같은 "기존" 스냅샷을 읽고 같은 INSERT 대상을 계산할 수 있는데, 이 경합은 애플리케이션 로직으로 막을 수 없고 DB 제약만 잡을 수 있기 때문.
+
+## 5. API 엔드포인트 (최종)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET/POST/PUT/DELETE | `/api/lines` | 라인 CRUD |
+| GET/POST/PUT/DELETE | `/api/processes?lineId=` | 공정 CRUD. 소속 라인은 멀티셀렉트(N:M), 갱신은 diff 동기화(§4-11) |
+| GET/POST/PUT/DELETE | `/api/workers?processId=` | 작업자 CRUD. 소속 공정은 멀티셀렉트(N:M), 갱신은 diff 동기화(§4-11) |
+| GET/POST/PUT/DELETE | `/api/equipment` | 설비 CRUD |
+| GET | `/api/pause-reasons` | 정지사유 목록(읽기 전용) |
+| GET | `/api/work-orders/open?processId=` | 이어하기용 미완료 작업지시 목록(`CompletedAt == null`) |
+| PATCH | `/api/work-orders/{id}` | `{lineId,processId,equipmentId?}` — 라인/공정 오선택 정정(§4-9). 라인-공정 조합 재검증 |
+| POST | `/api/work-logs/start` | `{workerId,startTime,workOrderId}` 또는 `{workerId,startTime,lineId,processId,equipmentId?,targetQty}` |
+| POST | `/api/work-logs/{id}/pause` | `{pausedAt,pauseReasonId}` |
+| POST | `/api/work-logs/{id}/resume` | `{resumedAt}` |
+| POST | `/api/work-logs/{id}/complete` | `{endTime,actualQty}`. `IN_PROGRESS`에서만 허용(§4-9) |
+| DELETE | `/api/work-logs/{id}` | 오입력/방치 데이터 삭제. 형제 WorkLog 없으면 WorkOrder도 같이 삭제, 남으면 실적 재계산 후 `CompletedAt` 재평가 |
+| GET | `/api/work-logs/{id}` | 상세조회(계획 비교 없음) |
+| GET | `/api/work-logs/efficiency?period=day\|week\|month\|year&date=&groupBy=worker\|process\|line\|equipment` | 대시보드 가동률 |
+
+## 6. 화면 구성 (최종 4개)
+
+1. **현장 작업 화면**: 이어하기 체크박스(끄면 새로 시작 입력폼, 켜면 미완료 작업지시 목록에서 선택) → 시작/일시정지(사유 선택)/재개/완료(실적수량 입력). 오입력 데이터는 삭제 가능.
+   - 신규 시작 입력폼은 **라인 → 공정 → 작업자 순 캐스케이딩 셀렉트**(상위 미선택 시 하위는 `disabled`). 공정을 먼저 고를 수 없게 막아, 연결되지 않은 라인-공정 조합 자체를 선택 불가능하게 만든다(§4-8)
+   - 완료 버튼은 `Paused` 동안 비활성화 + "정지 중입니다. 재개 후 완료해주세요" alert(§4-9)
+2. **대시보드**: 기간(일/주/월/연) × 그룹(작업자/공정/라인/설비) 가동률 그래프. 공정·라인은 세로 막대, 작업자·설비는 가로 막대+스크롤. "작업 시작 시각 기준 집계" 안내 문구 표시(§3-6).
+3. **상세조회 화면**: 실제 시작/종료, 정지 이력(사유별), 순수작업시간, 가동률 표시(계획 비교 없음). **라인/공정/설비 수정 다이얼로그** 제공 — 등록 화면과 동일한 캐스케이딩 규칙 적용(§4-9)
+4. **마스터데이터 관리 화면**: `[라인|공정|작업자|설비]` 탭, DataTable + Dialog CRUD
+   - 공정 탭은 소속 라인을, 작업자 탭은 소속 공정을 **멀티셀렉트**로 편집(N:M). 저장 시 diff 동기화(§4-11)
+   - 작업자가 한 명도 배정되지 않은 공정은 정상 상태이며, 작업자 목록이 비면 화면에서 빈 상태로 표시한다
+
+## 7. 남은 스코프 제안 (시간 되면)
+
+- JWT 기반 간단 인증(작업자 로그인)
+- `WorkLog` 상태 전이 메서드에 대한 xUnit 단위테스트 — 현재 상당 부분 작성됨(§8). `JoinTableSync.Diff`, `LineProcessValidator.IsValidCombination`, `EfficiencyCalculator.Merge`도 DB 없이 테스트 가능하도록 순수 함수로 분리해둠
+- README.md를 최신 설계에 맞게 갱신(현재 구버전 4-엔티티 설계 기준으로 남아있음), 프론트엔드 저장소(`C:\Users\aud92\frontend`, 별도 git repo) 링크 추가
+
+### 구현 시 체크리스트 (`AppDbContext.OnModelCreating`)
+
+- `LineProcess`, `WorkerProcess`에 복합 유니크 인덱스(§4-11)
+- `WorkLog.StartTime`에 일반 인덱스 — 대시보드가 매 조회마다 이 컬럼으로 범위 필터링함(§3-6)
+- 서비스 계층에서 `Include`/`ThenInclude` 누락 주의(§8-4)
+
+## 8. 코드 리뷰에서 발견/보완한 사항
+
+기존 초안을 스스로 검토하며 발견한 문제와 대응을 기록. (심각도 순)
+
+| # | 문제 | 대응 |
+|---|---|---|
+| 1 | `DateTime.Now`가 서버 로컬 시간에 의존 — AWS(UTC) 배포 시 한국시간 오전 입력이 전부 "미래 시각"으로 거부됨 | `Common/KoreaTime.Now`로 시간 기준 단일화, `WorkLog` 메서드들이 `now`를 파라미터로 받도록 변경 |
+| 2 | 상태 전이 가드 부재 — 연속 `Pause` 호출 시 "열린 정지"가 여러 개 생겨 시간 계산이 무한정 커짐, 완료 후 재시작/재완료도 가능했음 | 각 메서드에 현재 상태 검사 추가(`InvalidWorkLogStateException`), 정지구간 겹침 검증 추가 |
+| 3 | 방치된 진행중 작업을 취소/삭제할 방법이 없어 대시보드 분모가 무한히 커짐 | `DELETE /api/work-logs/{id}` 추가(§5) |
+| 4 | 네비게이션 프로퍼티(`PauseReason` 등) 미로딩 시 `NullReferenceException` — EF Core는 지연 로딩 기본 비활성 | 서비스 계층에서 `Include`/`ThenInclude` 필수화(구현 시 체크리스트) |
+| 5 | 작업자가 종료 없이 다른 작업을 또 시작할 수 있어 시간이 중복 집계됨 | 시작 시 해당 작업자의 활성(`IN_PROGRESS`/`PAUSED`) 건 존재 여부 검사 후 거부 |
+| 6 | 야간교대가 날짜 경계에서 잘리는 문제로 보였으나, 실제로는 개시일 기준 귀속이 교대조 집계 관행과 부합 | 의도된 결정으로 문서화(§3-6), 화면에 기준 안내 문구만 추가 |
+
+### 2차 리뷰 (2026-08-06)
+
+| # | 문제 | 대응 |
+|---|---|---|
+| 7 | `PAUSED` 상태에서 완료하면 열린 정지가 시간 합산에서만 빠지고 조업시간에는 포함돼 **가동률이 100%로 부풀려짐** — 정지 사유를 성실히 기록할수록 수치가 좋아지는 역설 | `Complete()` 가드를 `IN_PROGRESS` 전용으로 축소해 오류를 구조적으로 불가능하게 만듦(§4-9) |
+| 8 | 작업자가 여러 공정을 오갈 수 있는데 `Worker.ProcessId` 하나로 표현 불가 | `WorkerProcess` 조인 엔티티로 N:M 전환(§4-7) |
+| 9 | 두 라인이 같은 공정을 공유할 수 있는데 `Process.LineId` 하나로 표현 불가 | `LineProcess` 조인 엔티티로 N:M 전환 + `WorkOrder.LineId` 추가(§4-8) |
+| 10 | `PlannedStart`/`PlannedEnd`가 아무도 읽지 않는 죽은 스키마인데 "계획"이라는 이름으로 오해 유발 | 폐기(§4-10). `CompletedAt`은 이어하기 기능이 의존하므로 유지 |
+| 11 | 조인 테이블 중복 행을 막는 제약이 없음 — 수정 로직을 "선택분 추가"로 짜면 중복 누적 | 복합 유니크 인덱스 + diff 동기화(§4-11) |
+| 12 | 대시보드가 매 조회마다 `WorkLog.StartTime`으로 범위 필터링하는데 인덱스 없음 | `OnModelCreating`에 인덱스 추가(§7 체크리스트) |

@@ -9,10 +9,10 @@
         // 컴파일시 경고방지를 위해 default! 사용
         public string Name { get; set; } = default!;
 
-        // FK 프로퍼티와 네비게이션 프로퍼티
-        // EF Core가 자동으로 FK 인식
-        public int ProcessId { get; set; }
-        public Process Process { get; set; } = default!;
-    
+        // 작업자가 배정된 공정 목록 N:M
+        public ICollection<WorkerProcess> WorkerProcesses { get; set; } = new List<WorkerProcess>();
+
+        public ICollection<WorkLog> WorkLogs { get; set; } = new List<WorkLog>();
+
     }
 }
