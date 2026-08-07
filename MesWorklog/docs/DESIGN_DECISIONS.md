@@ -22,12 +22,12 @@ WorkOrder(작업지시) ──N:1──▶ Process (필수)
 
 | 엔티티 | 역할 | 비고 |
 |---|---|---|
-| `Line` | 생산 라인 | |
-| `Process` | 공정 | `Line`과 N:M (§4-8) — `LineId` FK 없음 |
+| `Line` | 생산 라인 | `IsActive` 보유(§4-12) |
+| `Process` | 공정 | `Line`과 N:M (§4-8) — `LineId` FK 없음. `IsActive` 보유 |
 | `LineProcess` | Line↔Process 조인 | `(LineId, ProcessId)` 유니크 인덱스 |
-| `Worker` | 작업자 | `Process`와 N:M (§4-7) — `ProcessId` FK 없음 |
+| `Worker` | 작업자 | `Process`와 N:M (§4-7) — `ProcessId` FK 없음. `IsActive` 보유 |
 | `WorkerProcess` | Worker↔Process 조인 | `(WorkerId, ProcessId)` 유니크 인덱스. `IsPrimary`(주공정) 컬럼은 검토 후 폐기(§4-7) |
-| `Equipment` | 설비 | **Process에 소속되지 않는 독립 마스터 데이터** (§4-2 참고) |
+| `Equipment` | 설비 | **Process에 소속되지 않는 독립 마스터 데이터** (§4-2 참고). `IsActive` 보유 |
 | `WorkOrder` | 작업지시 | "시작" 시점에 자동 생성됨(§4-4). `ProcessId`+`LineId`+`EquipmentId?`+`TargetQty`+`CompletedAt` 보유. `PlannedStart`/`PlannedEnd`는 폐기(§4-10) |
 | `WorkLog` | 작업이력(실적 트랜잭션) | `WorkOrderId` 필수 FK 1개만 가짐, 완료 시 캐시 컬럼 3개 확정 |
 | `WorkLogPause` | 정지 이력(1건당 1행) | `WorkLog` 1:N |
@@ -44,7 +44,7 @@ WorkOrder(작업지시) ──N:1──▶ Process (필수)
 ### 3-3. 서버 검증 규칙
 - 모든 시각은 미래 불가 (`InvalidTimeInputException`)
 - `pausedAt > startTime`, `resumedAt > pausedAt`(직전 재개시각 기준, 정지구간 겹침도 방지), `endTime > 마지막 기록 시각`
-- **상태 전이 가드**(`InvalidWorkLogStateException`): `Start`는 `WAITING`, `Pause`는 `IN_PROGRESS`, `Resume`은 `PAUSED`, **`Complete`는 `IN_PROGRESS`일 때만** 허용. 가드가 없으면 연속 `Pause` 호출 시 "열린 정지 이력"이 2개 이상 생겨 시간 계산이 무한정 커지는 버그가 발생함(§8-2). `Complete`를 `PAUSED`에서 제외한 이유는 §4-9 참고
+- **상태 전이 가드**(`InvalidWorkLogStateException`): `Pause`는 `IN_PROGRESS`, `Resume`은 `PAUSED`, **`Complete`는 `IN_PROGRESS`일 때만** 허용. 가드가 없으면 연속 `Pause` 호출 시 "열린 정지 이력"이 2개 이상 생겨 시간 계산이 무한정 커지는 버그가 발생함(§8-2). `Complete`를 `PAUSED`에서 제외한 이유는 §4-9 참고. **시작(`Start`)에는 가드가 없다** — 정적 팩토리라 애초에 "시작 전 상태"가 존재하지 않기 때문(§4-14)
 - **작업자 중복 시작 방지**: 서비스 계층에서 시작 시 해당 작업자에게 이미 `IN_PROGRESS`/`PAUSED` 건이 있으면 거부(§8-5)
 - **라인-공정 조합 검증**(`InvalidLineProcessCombinationException`): 요청으로 들어온 `lineId`+`processId`가 `LineProcess`에 실제 존재하는 조합인지 확인. 프론트가 라인→공정 캐스케이딩 셀렉트로 1차 차단하지만, Swagger 직접 호출이나 캐시된 낡은 목록은 막지 못하므로 서버가 최종 방어선(§4-8)
 - 위반 시 모두 409 Conflict + 에러 메시지 응답
@@ -146,14 +146,71 @@ NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 
 
 조인 테이블의 유니크 인덱스는 이 로직과 **별개로 유지**한다. 관리자 두 명이 동시에 저장하면 양쪽 모두 같은 "기존" 스냅샷을 읽고 같은 INSERT 대상을 계산할 수 있는데, 이 경합은 애플리케이션 로직으로 막을 수 없고 DB 제약만 잡을 수 있기 때문.
 
+### 4-12. 마스터데이터 삭제 정책 — 조건부 하드/소프트 삭제
+
+마스터데이터 관리 화면에서 라인/공정/작업자/설비를 삭제할 때, 참조하는 데이터가 남아 있으면 생기는 문제를 검토했다.
+
+**EF Core의 기본 동작이 가장 위험한 쪽이라는 점이 출발점이었다.** JPA는 `@ManyToOne`에 `cascade`를 명시하지 않으면 삭제가 전파되지 않지만(제약 위반 예외), **EF Core는 필수 FK면 Cascade가 기본값**이다. 즉 아무 설정 없이 마이그레이션을 만들면 작업자 1명을 지우는 순간 그 사람의 작업이력이 전부 사라지고, 대시보드의 과거 가동률이 소급해서 바뀐다.
+
+**판정 기준은 "작업 이력이 걸려 있는가" 하나다.**
+
+| 상황 | 처리 |
+|---|---|
+| `WorkOrder`/`WorkLog` 참조가 하나라도 있음 | `IsActive = false` (행 보존, 화면에서만 숨김) |
+| 조인 행(`LineProcess`/`WorkerProcess`)만 있음 | 실제 DELETE (조인 행은 Cascade로 함께 정리) |
+| 참조 없음 | 실제 DELETE |
+
+조인 행을 판정에서 제외한 이유는 **관계 데이터와 이력 데이터의 성격이 다르기 때문**이다. "1라인에 검사공정이 매핑돼 있었다"는 사실은 보존할 가치가 없지만, "누가 언제 무엇을 얼마나 만들었다"는 과거 사실이다. 조인 행까지 판정에 넣으면 "라인 하나 잘못 만들어서 공정 몇 개 붙였다가 지운" 경우까지 비활성 행으로 영원히 남는다.
+
+**DB 레벨은 `OnDelete(DeleteBehavior.Restrict)`로 이중 방어한다** — 이력을 참조하는 관계는 전부 Restrict, 조인 테이블만 Cascade. 서비스 계층이 실수해도 DB가 막는다. 반대로 서비스 계층의 사전 검사가 필요한 이유는, DB 제약만 두면 FK 위반이 500 에러로 나가서 사용자가 이유를 알 수 없기 때문이다(라인-공정 조합 검증과 같은 2단 구조).
+
+**전역 쿼리 필터(`HasQueryFilter`)는 의도적으로 쓰지 않는다.** EF Core의 전역 필터는 네비게이션 로딩에도 적용되어, 대시보드가 `.Include(l => l.Worker)`로 과거 `WorkLog`를 조회할 때 비활성 작업자가 걸러지며 **그 사람의 지난 실적이 통째로 사라진다.** 삭제를 막으려고 만든 장치가 같은 결과를 내는 셈이다(Hibernate의 `@Where`도 동일한 성질). 대신 조회 지점별로 명시적으로 거른다:
+
+| 조회 | `IsActive` 필터 | 이유 |
+|---|---|---|
+| 현장 작업 — **신규 시작** 드롭다운 | 적용 | 비활성 마스터로 새 작업을 시작하면 안 됨 |
+| 현장 작업 — **이어하기** 목록 | 미적용 | 진행 중이던 작업은 마스터가 비활성화돼도 끝낼 수 있어야 함 |
+| 대시보드 / 상세조회 | 미적용 | 퇴사자·폐기 설비의 과거 실적도 집계에 포함 |
+| 마스터데이터 관리 | 기본 적용 + `?includeInactive=true` 토글 | 비활성 항목을 아예 숨기면 되살릴 방법이 없어짐 |
+
+마지막 항목이 없으면 복직한 작업자를 다시 등록할 때 이름은 같지만 다른 `Id`가 되어 과거 이력과 연결이 끊긴 별개 인물이 된다.
+
+### 4-13. 데이터 접근 — EF Core + Dapper 하이브리드
+
+단순 CRUD와 도메인 로직은 EF Core로, 복잡한 집계/대량 조회는 Dapper로 나눈다.
+
+| 영역 | 도구 | 이유 |
+|---|---|---|
+| `WorkLog` 상태전이(`Start`/`Pause`/`Resume`/`Complete`), 마스터데이터(`Line`/`Process`/`Worker`/`Equipment`) CRUD | **EF Core** | 상태 가드 + 변경 감지(ChangeTracker) 기반 자동 저장이 필요한 Rich Domain Model(§4-9 등). 단순 CRUD는 EF Core의 컨벤션 기반 처리로 보일러플레이트가 적음 |
+| `GET /api/work-logs/efficiency` 대시보드 가동률 집계 | **Dapper** | 완료 건(캐시 컬럼 SUM) + 진행중 건(`NOW()` 기반 동적 계산)을 각각 조회 후 병합하는 구조(§3-5)라, 원래 EF Core로도 `FromSqlRaw`를 섞어야 했을 가능성이 높았음. 데이터량이 큰 집계 쿼리라 실행 SQL을 직접 통제하는 편이 안전 |
+
+**검토했던 대안과 기각 이유**: 전체를 Dapper로 전환하는 안도 검토했으나, 그러면 `WorkLog`의 상태 가드·`private set`·자동 저장이 전제하는 변경 감지 자체가 사라져 지금까지의 도메인 모델 설계 대부분을 다시 짜야 했다(상태전이 메서드 호출 후 바뀐 컬럼을 매번 수동 UPDATE로 동기화해야 하므로, `private set`으로 막으려던 것과 같은 종류의 동기화 누락 위험이 형태만 바뀌어 재발). 반대로 전체를 EF Core로만 유지하는 안은 대시보드 집계에서 결국 raw SQL을 섞게 될 가능성이 높아 실익이 적었다.
+
+**하이브리드로 인한 비용(알려진 트레이드오프)**:
+- 스키마 변경 시 이중 관리 — EF Core 쪽은 `.Property(w => w.X)`처럼 C# 참조라 리팩터링 도구가 따라가지만, Dapper의 SQL 문자열 속 컬럼명은 자동으로 안 따라옴
+- Dapper 쿼리는 EF Core InMemory 같은 단위테스트 수단이 없어 실제 DB(또는 Testcontainers) 기반 통합테스트가 별도로 필요(§7 체크리스트에 반영)
+- 두 접근 방식 다 읽기 전용 대시보드 쿼리에만 Dapper를 쓰므로, EF Core 쓰기 트랜잭션과 연결을 공유해야 하는 상황은 현재 스코프에 없음
+
+`EfficiencyCalculator.Merge()`(§3-5)는 DB 접근과 분리된 순수 함수라 이 결정과 무관하게 그대로 재사용된다.
+
+### 4-14. WAITING 상태 폐기 — 생성과 시작을 정적 팩토리로 통합
+
+`WorkLogStatus`에서 `Waiting`을 제거하고, `new WorkLog(...)` → `Start()` 2단계 생성을 정적 팩토리 `WorkLog.Start(...)` 하나로 합쳤다.
+
+**폐기 근거**: §4-4 설계상 `WorkOrder`+`WorkLog`가 시작 시점에 한 트랜잭션으로 함께 생성되므로, `Waiting`은 생성 직후 `Start()` 호출 전까지 메모리에만 존재하고 **DB에 저장되는 경로가 없었다.** 즉 실제로 관측되지 않는 상태를 위해 enum 멤버 1개, `Start()`의 상태 가드, 그 가드를 검증하는 테스트를 유지하고 있었다.
+
+**부수 효과 — 가드가 사라지는 게 아니라 불필요해진다**: 기존 `Start()`의 가드는 이중 시작(`StartTime` 덮어쓰기)을 막는 역할이었는데, 정적 팩토리로 바꾸면 **"시작되지 않은 `WorkLog`"라는 객체를 만들 방법 자체가 없어져** 이중 시작이 구조적으로 불가능해진다. §4-9에서 `Complete()`를 `IN_PROGRESS`로 좁혀 계산 오류를 불가능하게 만든 것과 같은 접근이다.
+
+**검토했던 반대 논거**: §4-4에서 "향후 작업지시 사전등록 기능이 생기면 자동생성 로직만 교체하면 된다"고 확장 여지를 남겨뒀고, 그 경우 `Waiting`으로 저장되는 시나리오가 실제로 생긴다. 다만 그때 가서 enum 멤버와 별도 팩토리를 추가하는 비용이 크지 않고, **지금 쓰지 않는 것을 미리 만들어두지 않는다**는 §4-7(`IsPrimary` 폐기)의 원칙을 우선하기로 했다.
+
 ## 5. API 엔드포인트 (최종)
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET/POST/PUT/DELETE | `/api/lines` | 라인 CRUD |
-| GET/POST/PUT/DELETE | `/api/processes?lineId=` | 공정 CRUD. 소속 라인은 멀티셀렉트(N:M), 갱신은 diff 동기화(§4-11) |
-| GET/POST/PUT/DELETE | `/api/workers?processId=` | 작업자 CRUD. 소속 공정은 멀티셀렉트(N:M), 갱신은 diff 동기화(§4-11) |
-| GET/POST/PUT/DELETE | `/api/equipment` | 설비 CRUD |
+| GET/POST/PUT/DELETE | `/api/lines?includeInactive=` | 라인 CRUD. DELETE는 §4-12 정책 적용 |
+| GET/POST/PUT/DELETE | `/api/processes?lineId=&includeInactive=` | 공정 CRUD. 소속 라인은 멀티셀렉트(N:M), 갱신은 diff 동기화(§4-11) |
+| GET/POST/PUT/DELETE | `/api/workers?processId=&includeInactive=` | 작업자 CRUD. 소속 공정은 멀티셀렉트(N:M), 갱신은 diff 동기화(§4-11) |
+| GET/POST/PUT/DELETE | `/api/equipment?includeInactive=` | 설비 CRUD |
 | GET | `/api/pause-reasons` | 정지사유 목록(읽기 전용) |
 | GET | `/api/work-orders/open?processId=` | 이어하기용 미완료 작업지시 목록(`CompletedAt == null`) |
 | PATCH | `/api/work-orders/{id}` | `{lineId,processId,equipmentId?}` — 라인/공정 오선택 정정(§4-9). 라인-공정 조합 재검증 |
@@ -175,11 +232,13 @@ NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 
 4. **마스터데이터 관리 화면**: `[라인|공정|작업자|설비]` 탭, DataTable + Dialog CRUD
    - 공정 탭은 소속 라인을, 작업자 탭은 소속 공정을 **멀티셀렉트**로 편집(N:M). 저장 시 diff 동기화(§4-11)
    - 작업자가 한 명도 배정되지 않은 공정은 정상 상태이며, 작업자 목록이 비면 화면에서 빈 상태로 표시한다
+   - **"비활성 포함" 체크박스** 제공 — 작업 이력이 있어 비활성 처리된 항목을 확인/복구할 수 있는 유일한 경로(§4-12)
 
 ## 7. 남은 스코프 제안 (시간 되면)
 
 - JWT 기반 간단 인증(작업자 로그인)
 - `WorkLog` 상태 전이 메서드에 대한 xUnit 단위테스트 — 현재 상당 부분 작성됨(§8). `JoinTableSync.Diff`, `LineProcessValidator.IsValidCombination`, `EfficiencyCalculator.Merge`도 DB 없이 테스트 가능하도록 순수 함수로 분리해둠
+- Dapper 기반 대시보드 집계 쿼리(§4-13)는 단위테스트 수단이 없어 실제 DB(또는 Testcontainers) 기반 통합테스트 별도 구축 필요
 - README.md를 최신 설계에 맞게 갱신(현재 구버전 4-엔티티 설계 기준으로 남아있음), 프론트엔드 저장소(`C:\Users\aud92\frontend`, 별도 git repo) 링크 추가
 
 ### 구현 시 체크리스트 (`AppDbContext.OnModelCreating`)
@@ -211,3 +270,4 @@ NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 
 | 10 | `PlannedStart`/`PlannedEnd`가 아무도 읽지 않는 죽은 스키마인데 "계획"이라는 이름으로 오해 유발 | 폐기(§4-10). `CompletedAt`은 이어하기 기능이 의존하므로 유지 |
 | 11 | 조인 테이블 중복 행을 막는 제약이 없음 — 수정 로직을 "선택분 추가"로 짜면 중복 누적 | 복합 유니크 인덱스 + diff 동기화(§4-11) |
 | 12 | 대시보드가 매 조회마다 `WorkLog.StartTime`으로 범위 필터링하는데 인덱스 없음 | `OnModelCreating`에 인덱스 추가(§7 체크리스트) |
+| 13 | 마스터데이터 삭제 시 **EF Core 기본값이 Cascade**라, 작업자 1명 삭제로 그 사람의 작업이력이 전부 사라지고 과거 가동률이 소급 변경됨 (JPA는 기본이 "전파 안 함"이라 Java 경험만으론 놓치기 쉬움) | 이력 참조 관계에 `Restrict` 명시 + 조건부 하드/소프트 삭제 정책(§4-12) |

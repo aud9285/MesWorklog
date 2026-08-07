@@ -12,7 +12,8 @@
         // 계획정지, 비가동 분류
         public PauseCategory Category { get; set; }
 
-        public ICollection<WorkLogPause> WorkLogPauses { get; set; } = new List<WorkLogPause>();
+        //실사용하지않아 주석처리
+        //public ICollection<WorkLogPause> WorkLogPauses { get; set; } = new List<WorkLogPause>();
 
     }
 }

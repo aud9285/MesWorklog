@@ -14,7 +14,6 @@
         // 이 작업지시가 실제로 실행된 라인
         public int LineId { get; set; }
 
-       
         public Line Line { get; set; } = default!;
 
        
