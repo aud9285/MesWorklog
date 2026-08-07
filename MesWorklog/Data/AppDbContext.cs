@@ -5,6 +5,6 @@ namespace MesWorklog.Data
 {
     public class AppDbContext
     {
-        
+    
     }
 }
