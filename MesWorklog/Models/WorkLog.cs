@@ -1,4 +1,6 @@
-﻿namespace MesWorklog.Models
+﻿using MesWorklog.Exceptions;
+
+namespace MesWorklog.Models
 {
     public class WorkLog
     {
@@ -47,7 +49,7 @@
 
         // 작업 시작
         // 미래시간 입력 방지
-        public void Start(DateTime startTime, DateTime now)
+        public static WorkLog Start(int workOrderId, int workerId, DateTime startTime, DateTime now)
         {
             ValidateNotFuture(startTime, now, "시작 시각");
 

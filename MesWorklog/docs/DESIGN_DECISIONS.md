@@ -207,7 +207,7 @@ NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET/POST/PUT/DELETE | `/api/lines?includeInactive=` | 라인 CRUD. DELETE는 §4-12 정책 적용 |
+| GET/POST/PUT/DELETE | `/api/lines?includeInactive=` | 라인 CRUD. DELETE는 §4-12 정책 적용 + 아래 공통 응답 |
 | GET/POST/PUT/DELETE | `/api/processes?lineId=&includeInactive=` | 공정 CRUD. 소속 라인은 멀티셀렉트(N:M), 갱신은 diff 동기화(§4-11) |
 | GET/POST/PUT/DELETE | `/api/workers?processId=&includeInactive=` | 작업자 CRUD. 소속 공정은 멀티셀렉트(N:M), 갱신은 diff 동기화(§4-11) |
 | GET/POST/PUT/DELETE | `/api/equipment?includeInactive=` | 설비 CRUD |
@@ -219,6 +219,13 @@ NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 
 | POST | `/api/work-logs/{id}/resume` | `{resumedAt}` |
 | POST | `/api/work-logs/{id}/complete` | `{endTime,actualQty}`. `IN_PROGRESS`에서만 허용(§4-9) |
 | DELETE | `/api/work-logs/{id}` | 오입력/방치 데이터 삭제. 형제 WorkLog 없으면 WorkOrder도 같이 삭제, 남으면 실적 재계산 후 `CompletedAt` 재평가 |
+
+**마스터데이터 DELETE 공통 응답**: 실제 삭제와 비활성화 중 어느 쪽이 일어났는지 화면이 알아야 결과 토스트를 띄울 수 있으므로(§6-1), 204가 아니라 아래 형태로 응답한다.
+
+```json
+{ "result": "deleted" }                        // 참조 이력이 없어 실제 삭제됨
+{ "result": "deactivated", "historyCount": 120 }  // 이력이 있어 IsActive=false 처리됨
+```
 | GET | `/api/work-logs/{id}` | 상세조회(계획 비교 없음) |
 | GET | `/api/work-logs/efficiency?period=day\|week\|month\|year&date=&groupBy=worker\|process\|line\|equipment` | 대시보드 가동률 |
 
@@ -232,6 +239,33 @@ NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 
 4. **마스터데이터 관리 화면**: `[라인|공정|작업자|설비]` 탭, DataTable + Dialog CRUD
    - 공정 탭은 소속 라인을, 작업자 탭은 소속 공정을 **멀티셀렉트**로 편집(N:M). 저장 시 diff 동기화(§4-11)
    - 작업자가 한 명도 배정되지 않은 공정은 정상 상태이며, 작업자 목록이 비면 화면에서 빈 상태로 표시한다
+
+### 6-1. 삭제 확인 팝업
+
+삭제는 되돌릴 수 없으므로 모달 팝업으로 한 번 더 확인받는다. 단 **모든 삭제에 붙이지는 않는다** — 확인창이 남발되면 사용자가 내용을 읽지 않고 습관적으로 누르게 되어, 정작 위험한 작업의 경고력이 떨어지기 때문이다.
+
+| 동작 | 확인창 | 판단 근거 |
+|---|---|---|
+| 마스터데이터 삭제(라인/공정/작업자/설비) | 적용 | 결과가 삭제/비활성화 두 갈래라 사전 안내 필요 |
+| 작업이력(`WorkLog`) 삭제 | 적용 (경고 수위 높임) | 연쇄 삭제 + 복구 불가 + 집계 영향 |
+| 조인 체크 해제(공정의 라인, 작업자의 공정) | 미적용 | 관계 데이터라 잃는 정보가 없음(§4-12) |
+| 수정/저장(`PATCH` 등) | 미적용 | 되돌릴 수 있는 작업 |
+
+**문구 원칙**: 마스터데이터는 "삭제" 버튼이지만 이력이 있으면 실제로는 비활성화되므로(§4-12), 팝업에서 그 조건을 미리 알린다. 작업이력은 함께 사라지는 것들을 항목으로 나열한다.
+
+```
+[작업자 삭제]                          [작업이력 삭제]
+'김철수'을(를) 삭제하시겠습니까?         이 작업이력을 삭제하시겠습니까?
+ · 작업 이력이 있는 경우 삭제되지         · 정지 기록도 함께 삭제됩니다
+   않고 비활성 처리되어, 목록에서만       · 이 작업지시에 다른 작업이력이 없으면
+   숨겨지고 과거 실적은 유지됩니다          작업지시도 함께 삭제됩니다
+                                        · 삭제된 데이터는 복구할 수 없으며,
+                                          가동률 집계에서 제외됩니다
+```
+
+**구현**: PrimeVue `ConfirmDialog`의 `message`는 문자열 한 줄만 받아 `\n`이 줄바꿈으로 렌더링되지 않으므로, `Dialog`(modal) 기반 재사용 컴포넌트로 만들어 경고 항목을 목록으로 표시한다. 취소는 `text` 버튼, 삭제만 `severity="danger"`로 두고, ESC·X·배경 클릭은 모두 취소로 동작시킨다(안전한 쪽이 쉬운 쪽이 되도록).
+
+**삭제 후 결과 안내**: 마스터데이터는 팝업에서 "둘 중 하나"라고만 알렸으므로 실제 결과를 토스트로 알린다. 이를 위해 `DELETE` 응답은 204가 아니라 어떤 처리가 일어났는지를 담는다(§5).
    - **"비활성 포함" 체크박스** 제공 — 작업 이력이 있어 비활성 처리된 항목을 확인/복구할 수 있는 유일한 경로(§4-12)
 
 ## 7. 남은 스코프 제안 (시간 되면)

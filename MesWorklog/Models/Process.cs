@@ -6,6 +6,8 @@
         // EF core C# 자동 프로퍼티
         public int Id{ get; set; }
 
+        public string Name { get; set; } = default!;
+
         // 삭제시 논리삭제를 위해 IsActive 속성 추가, true이면 활성, false이면 비활성
         public bool IsActive { get; set; } = true;
 

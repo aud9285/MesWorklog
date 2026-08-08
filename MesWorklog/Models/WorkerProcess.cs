@@ -9,7 +9,7 @@
         //public int Id { get; set; }
 
         // 어느 작업자인지
-        public string WorkerId { get; set; } = default!;
+        public int WorkerId { get; set; }
 
         // id값만 필요해서 주석처리
         //public Worker Worker { get; set; } = default!;
