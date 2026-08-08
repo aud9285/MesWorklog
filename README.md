@@ -8,7 +8,8 @@ MES 기능중에서 작업자별로 업무 시작/일시정지/재개/종료 기
 
 Language : C#  
 Framework : .NET 10, ASP.NET Core Web API  
-ORM : Entity Framework Core + Pomelo.EntityFrameworkCore.MySql  
+ORM : Entity Framework Core + Pomelo.EntityFrameworkCore.MySql
+      Dapper + EFCore.NamingConventions
 DB : MySQL  
 
 ## 실행 화면
@@ -72,6 +73,8 @@ dotnet run
 
 마스터데이터 5개 + 조인 2개 + 트랜잭션 3개로 구성됩니다.
 
+<img width="1178" height="727" alt="Image" src="https://github.com/user-attachments/assets/fb245c24-cfbf-4dd3-8d29-2369c8d4c533" />
+
 ```
 Line(라인)    ──N:M──▶ Process(공정)     ※ 조인: LineProcess
 Process(공정) ──N:M──▶ Worker(작업자)    ※ 조인: WorkerProcess
@@ -87,6 +90,10 @@ WorkOrder(작업지시) ──N:1──▶ Process (필수)
 
 
 `WorkLog`가 `Worker`-`WorkOrder` 간 N:M 관계를 풀어주는 중간 테이블 역할을 합니다.
+
+LineProcess, WorkerProcess는 복합키로 관리
+
+테이블·컬럼명은 스네이크 케이스(`work_logs`, `elapsed_minutes`)이며, 각 테이블과 컬럼에 한글 논리명이 COMMENT로 기록되어 있습니다.
 
 ## 핵심 비즈니스 로직
 
@@ -159,7 +166,7 @@ WorkOrder(작업지시) ──N:1──▶ Process (필수)
 ## 진행 상태
 
 - 설계 완료
-- 백엔드: 프로젝트 생성 및 초기 설계 단계
+- 백엔드: 도메인 모델 : 완료, 데이터 계층 : 완료, 서비스/컨트롤러 : 진행중
 - 프론트엔드: 화면 골격 구성 중
 
 - 
