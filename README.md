@@ -18,9 +18,19 @@ DB : MySQL
 
 ## 실행 방법
 
--- 개발중
+## 테스트
 
-## 실행 방법
+```bash
+dotnet test
+```
+
+`WorkLog`의 상태 전이 가드와 OEE 시간 분해를 검증하는 단위테스트 11건이 있습니다.
+DB나 웹 서버 없이 실행되며, 아래 항목들을 고정합니다.
+
+- 정지 중에는 완료 불가 — 가동률이 100%로 부풀려지던 버그 방지
+- 연속 정지 불가 — 열린 정지가 여러 개 생겨 시간 계산이 커지던 문제 방지
+- 모든 시각 입력의 미래 시각 거부
+- 계획정지/비가동이 각각 차감되는지 (조업 180분 → 가동 150분 → 실가동 130분)
 
 ### 사전 요구사항
 
@@ -143,18 +153,24 @@ LineProcess, WorkerProcess는 복합키로 관리
 
 ## API 엔드포인트
 
-| Method | Path | 설명 |
-|---|---|---|
-| GET | `/api/processes` | 공정 목록 |
-| GET | `/api/workers?processId=` | 작업자 목록 |
-| GET | `/api/work-orders?date=&processId=` | 작업지시 목록 |
-| POST | `/api/work-logs/start` | `{ workOrderId, workerId, startTime }` |
-| POST | `/api/work-logs/{id}/pause` | `{ pausedAt }` |
-| POST | `/api/work-logs/{id}/resume` | `{ resumedAt }` |
-| POST | `/api/work-logs/{id}/complete` | `{ endTime, actualQty }` |
-| GET | `/api/work-logs/{id}` | 상세 조회 |
-| GET | `/api/work-logs/timeline?date=` | 대시보드 타임라인(작업자별 세그먼트) |
-| GET | `/api/work-logs/utilization?date=` | 작업자별 가동률 |
+✅ 구현 완료 / ⬜ 설계 완료(미구현)
+
+| | Method | Path | 설명 |
+|---|---|---|---|
+| ✅ | GET/POST/PUT/DELETE | `/api/lines?includeInactive=` | 라인 CRUD |
+| ⬜ | GET/POST/PUT/DELETE | `/api/processes?lineId=&includeInactive=` | 공정 CRUD (소속 라인 N:M) |
+| ⬜ | GET/POST/PUT/DELETE | `/api/workers?processId=&includeInactive=` | 작업자 CRUD (소속 공정 N:M) |
+| ⬜ | GET/POST/PUT/DELETE | `/api/equipment?includeInactive=` | 설비 CRUD |
+| ⬜ | GET | `/api/pause-reasons` | 정지사유 목록 |
+| ⬜ | GET | `/api/work-orders/open?processId=` | 이어하기용 미완료 작업지시 |
+| ⬜ | PATCH | `/api/work-orders/{id}` | 라인/공정/설비 오선택 정정 |
+| ⬜ | POST | `/api/work-logs/start` | `{workerId, startTime, workOrderId}` 또는 신규 생성 |
+| ⬜ | POST | `/api/work-logs/{id}/pause` | `{pausedAt, pauseReasonId}` |
+| ⬜ | POST | `/api/work-logs/{id}/resume` | `{resumedAt}` |
+| ⬜ | POST | `/api/work-logs/{id}/complete` | `{endTime, actualQty}` |
+| ⬜ | DELETE | `/api/work-logs/{id}` | 오입력 이력 삭제 |
+| ⬜ | GET | `/api/work-logs/{id}` | 상세 조회 |
+| ⬜ | GET | `/api/work-logs/efficiency?period=&date=&groupBy=` | 대시보드 가동률 |
 
 ## 화면 구성
 
@@ -166,7 +182,14 @@ LineProcess, WorkerProcess는 복합키로 관리
 ## 진행 상태
 
 - 설계 완료
-- 백엔드: 도메인 모델 : 완료, 데이터 계층 : 완료, 서비스/컨트롤러 : 진행중
+-- 백엔드
+  - 도메인 모델 / 데이터 계층(EF Core, 마이그레이션): 완료
+  - 전역 예외 처리(`IExceptionHandler` → ProblemDetails): 완료
+  - 라인 CRUD API: 완료
+  - 공정 / 작업자 / 설비 CRUD: 예정
+  - 작업이력(시작·정지·재개·완료) API: 예정
+  - Dapper 기반 대시보드 집계: 예정
+- 테스트: `WorkLog` 상태 전이 단위테스트 11건
 - 프론트엔드: 화면 골격 구성 중
 
 - 
