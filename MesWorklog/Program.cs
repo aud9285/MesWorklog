@@ -1,5 +1,6 @@
 using MesWorklog.Data;
 using MesWorklog.Middleware;
+using MesWorklog.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +16,8 @@ builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 // Exception 핸들러 등록(GlobalExceptionHandler)
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+// LineService
+builder.Services.AddScoped<LineService>();
 
 var connectionString = builder.Configuration.GetConnectionString("MesDb")!;
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -31,6 +34,7 @@ app.UseExceptionHandler();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.UseSwaggerUI(options => options.SwaggerEndpoint("/openapi/v1.json", "MES Worklog API"));
 }
 
 app.UseHttpsRedirection();
