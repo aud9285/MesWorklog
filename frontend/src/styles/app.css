@@ -1,0 +1,140 @@
+/* 앱 전역 스타일
+ * PrimeFlex를 설치하지 않았으므로, 화면에서 실제로 쓰는 최소한의 레이아웃 유틸리티만 직접 정의한다.
+ * (기존 컴포넌트들이 flex / gap-2 / justify-content-between 같은 PrimeFlex 클래스를 쓰고 있었는데
+ *  패키지가 없어서 아무 효과도 없는 상태였다) */
+
+:root {
+  --app-max-width: 1180px;
+
+  --surface-page: #f6f7f9;
+  --surface-card: #ffffff;
+  --surface-border: #e2e5ea;
+  --surface-muted: #f1f3f6;
+
+  --text-strong: #1c2430;
+  --text-normal: #48505c;
+  --text-muted: #8b94a3;
+
+  --brand: #2f6fed;
+  --ok: #17a673;
+  --warn: #e8a13a;
+  --danger: #e05252;
+  --planned: #7c8db5;
+  --unplanned: #e08a52;
+
+  font: 15px/1.5 system-ui, 'Segoe UI', Roboto, 'Malgun Gothic', sans-serif;
+  color: var(--text-normal);
+  background: var(--surface-page);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-page);
+  color: var(--text-normal);
+}
+
+h1, h2, h3, h4 {
+  color: var(--text-strong);
+  margin: 0;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* ── 레이아웃 유틸리티 ───────────────────────────── */
+.row { display: flex; align-items: center; }
+.row-top { display: flex; align-items: flex-start; }
+.col { display: flex; flex-direction: column; }
+.wrap { flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.end { justify-content: flex-end; }
+.center { justify-content: center; }
+.grow { flex: 1; }
+
+.g-1 { gap: 4px; }
+.g-2 { gap: 8px; }
+.g-3 { gap: 12px; }
+.g-4 { gap: 16px; }
+.g-5 { gap: 24px; }
+
+.mt-2 { margin-top: 8px; }
+.mt-3 { margin-top: 12px; }
+.mt-4 { margin-top: 16px; }
+.mb-2 { margin-bottom: 8px; }
+.mb-3 { margin-bottom: 12px; }
+
+/* ── 공통 조각 ──────────────────────────────────── */
+
+/* 화면 상단의 회색 안내 문구 (예: "작업 시작 시각 기준 집계") */
+.hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* 입력 한 칸: 라벨 + 컨트롤 세로 배치 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 150px;
+}
+.field > label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* 값을 크게 보여주는 지표 타일 */
+.metric {
+  background: var(--surface-muted);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 128px;
+}
+.metric .k {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.metric .v {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-strong);
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+.metric .v small {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
+/* 데이터가 없을 때 표시하는 빈 영역 */
+.empty {
+  padding: 34px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  border: 1px dashed var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+/* 숫자 정렬용 — 시간/수량이 자릿수 때문에 흔들리지 않게 */
+.num { font-variant-numeric: tabular-nums; }
+
+/* 연동 전 임시 데이터임을 알리는 배너 */
+.mock-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: #fff6e5;
+  border: 1px solid #f3d9a4;
+  color: #8a6320;
+  font-size: 12.5px;
+}
