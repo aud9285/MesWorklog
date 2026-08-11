@@ -18,7 +18,7 @@ namespace MesWorklog.Dtos
         [MaxLength(100, ErrorMessage = "라인명은 100자를 넘을 수 없습니다.")]
         public string Name { get; set; } = default!;
 
-        // 비활성화된 라인을 다시 살릴 때 사용(§4-12의 "비활성 포함 보기" 화면에서)
+        // 비활성화된 라인을 다시 살릴 때 사용
         public bool IsActive { get; set; } = true;
     }
 

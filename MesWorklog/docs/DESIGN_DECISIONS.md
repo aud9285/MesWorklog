@@ -157,7 +157,9 @@ NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 
 
 ### 4-11. 조인 테이블 갱신 — diff 동기화
 
-마스터데이터 화면에서 멀티셀렉트로 조합을 수정할 때, "기존 행 전부 삭제 후 재삽입" 대신 **diff 방식**을 쓴다. 프론트가 체크된 id 목록 전체를 보내면 백엔드가 `INSERT 대상 = 요청 − 기존`, `DELETE 대상 = 기존 − 요청`을 계산해 변경분만 반영한다. 안 바뀐 행의 Id가 보존되고 불필요한 쓰기가 없다. 판단 로직은 `JoinTableSync.Diff()` 순수 함수로 분리해 DB 없이 단위테스트 가능하게 했다(`EfficiencyCalculator.Merge`, `LineProcessValidator.IsValidCombination`과 같은 패턴).
+마스터데이터 화면에서 멀티셀렉트로 조합을 수정할 때, "기존 행 전부 삭제 후 재삽입" 대신 **diff 방식**을 쓴다. 프론트가 체크된 id 목록 전체를 보내면 백엔드가 `INSERT 대상 = 요청 − 기존`, `DELETE 대상 = 기존 − 요청`을 계산해 변경분만 반영한다.
+
+`LineProcess`/`WorkerProcess`는 서로게이트 `Id` 없이 복합키(두 FK)만 갖고 추가 컬럼도 없어서, "안 바뀐 행의 Id가 보존된다"는 이유는 성립하지 않는다 — 애초에 보존할 Id가 없다. diff 방식을 쓰는 진짜 이유는 두 가지다: (1) 같은 `SaveChanges` 안에서 동일 키를 delete 직후 insert하는 걸 피해 유니크 인덱스 충돌 가능성을 없앤다, (2) 판단 로직을 `JoinTableSync.Diff()` 순수 함수로 분리해 DB 없이 단위테스트 가능하게 한다(`EfficiencyCalculator.Merge`, `LineProcessValidator.IsValidCombination`과 같은 패턴).
 
 조인 테이블의 유니크 인덱스는 이 로직과 **별개로 유지**한다. 관리자 두 명이 동시에 저장하면 양쪽 모두 같은 "기존" 스냅샷을 읽고 같은 INSERT 대상을 계산할 수 있는데, 이 경합은 애플리케이션 로직으로 막을 수 없고 DB 제약만 잡을 수 있기 때문.
 
