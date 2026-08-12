@@ -10,7 +10,7 @@ Language : C#
 Framework : .NET 10, ASP.NET Core Web API  
 ORM : Entity Framework Core + Pomelo.EntityFrameworkCore.MySql
       Dapper + EFCore.NamingConventions
-DB : MySQL  
+DB : MySQL
 
 ## 실행 화면
 
@@ -81,8 +81,8 @@ dotnet run
 
 ### 6. 프론트엔드 실행 (선택)
 
-`frontend/` 폴더에 별도의 Vue 3 + PrimeVue 프로젝트가 있습니다. 현재는 API 연동 전 단계라
-화면은 목 데이터(`frontend/src/mock`)로 채워져 있으며, 각 컴포넌트 상단의 `TODO(연동)` 주석에
+`frontend/` 폴더에 별도의 Vue 3 + PrimeVue 프로젝트가 있습니다. 현재 마스터데이터 화면 API 연동완료.
+나머지 3개의 화면은 목 데이터(`frontend/src/mock`)로 채워져 있으며, 각 컴포넌트 상단의 `TODO(연동)` 주석에
 붙일 엔드포인트가 정리되어 있습니다.
 
 ```bash
@@ -172,9 +172,9 @@ LineProcess, WorkerProcess는 복합키로 관리
 | | Method | Path | 설명 |
 |---|---|---|---|
 | ✅ | GET/POST/PUT/DELETE | `/api/lines?includeInactive=` | 라인 CRUD |
-| ⬜ | GET/POST/PUT/DELETE | `/api/processes?lineId=&includeInactive=` | 공정 CRUD (소속 라인 N:M) |
-| ⬜ | GET/POST/PUT/DELETE | `/api/workers?processId=&includeInactive=` | 작업자 CRUD (소속 공정 N:M) |
-| ⬜ | GET/POST/PUT/DELETE | `/api/equipment?includeInactive=` | 설비 CRUD |
+| ✅ | GET/POST/PUT/DELETE | `/api/processes?includeInactive=` | 공정 CRUD (소속 라인 N:M, lineIds 배열로 응답) |
+| ✅ | GET/POST/PUT/DELETE | `/api/workers?processId=&includeInactive=` | 작업자 CRUD (소속 공정 N:M, processIds 배열로 응답) |
+| ✅ | GET/POST/PUT/DELETE | `/api/equipments?includeInactive=` | 설비 CRUD |
 | ⬜ | GET | `/api/pause-reasons` | 정지사유 목록 |
 | ⬜ | GET | `/api/work-orders/open?processId=` | 이어하기용 미완료 작업지시 |
 | ⬜ | PATCH | `/api/work-orders/{id}` | 라인/공정/설비 오선택 정정 |
@@ -188,7 +188,7 @@ LineProcess, WorkerProcess는 복합키로 관리
 
 ## 화면 구성
 
-UI/UX는 구현 완료(목 데이터 기준), API 연동은 진행 예정입니다. 소스는 `frontend/src/components/`.
+UI/UX는 구현 완료. 마스터데이터 화면은 API 연동 완료, 나머지 3개 화면은 아직 목 데이터 기준입니다. 소스는 `frontend/src/components/`.
 
 1. **현장 작업 화면** (`WorkerDashboard.vue`): **작업자 선택이 먼저** — 그 작업자의 활성 건이 있으면 진행중 카드(정지/재개/완료/삭제), 없으면 시작 폼. 이어하기 체크박스(끄면 라인→공정 캐스케이딩 셀렉트로 신규 생성, 켜면 미완료 작업지시 카드에서 선택). 시각은 10분 단위 선택 + 미래 시각 차단. 완료는 시각 확정 → 실적수량 입력 2단계. 목표/누적/잔여 수량 표시
 2. **대시보드** (`Dashboard.vue`): 기간(일/월/연) × 그룹(작업자/공정/라인/설비) 가동률 그래프. 공정·라인은 세로 막대, 작업자·설비는 가로 막대 + 스크롤. CSS 기반 막대라 별도 차트 라이브러리 없음
@@ -212,8 +212,15 @@ MesWorklog/
   - 도메인 모델 / 데이터 계층(EF Core, 마이그레이션): 완료
   - 전역 예외 처리(`IExceptionHandler` → ProblemDetails): 완료
   - 라인 CRUD API: 완료 (Swagger 검증 완료 — 400/201/409/404 전부 확인)
-  - 공정 / 작업자 / 설비 CRUD: 예정
+  - 공정 / 작업자 / 설비 CRUD: 완료(프론트엔드 연동 후 테스트 완료)
   - 작업이력(시작·정지·재개·완료) API: 예정
   - Dapper 기반 대시보드 집계: 예정
 - 테스트: `WorkLog` 상태 전이·OEE 시간 분해 단위테스트 11건 (`dotnet test`)
-- 프론트엔드: 화면 4개 UI/UX 구현 완료(목 데이터 기준), API 연동 예정
+- 프론트엔드: 화면 4개 UI/UX 구현 완료(목 데이터 기준), 마스터데이터 화면 API 연동 완료, 나머지 3개 화면 연동 예정
+
+## AI 도구 활용
+
+이 프로젝트는 개발 과정에서 Claude(Anthropic)를 도구로 활용했습니다.
+- Java(MyBatis) 경험을 C#/EF Core로 옮기는 과정에서 개념 설명·비교 학습 용도로 활용
+- **프론트엔드 UI/UX(컴포넌트 마크업·스타일)**: Claude가 작성
+- 디버깅 시 원인 분석 보조로 활용 (실제 수정은 직접 진행)
