@@ -163,16 +163,22 @@ export const api = {
             `/work-orders?date=${date}${processId ? `&processId=${processId}` : ""}`,
         ),
 
-    startWorkLog: (workOrderId, workerId, startTime) =>
+    // POST /api/work-logs/start
+    // 이어하기:  { workerId, startTime, workOrderId }
+    // 신규 생성: { workerId, startTime, lineId, processId, equipmentId?, targetQty }
+    // 두 형태가 필드 구성이 아예 달라서, 고정 파라미터 대신 payload 객체를 그대로 넘긴다
+    startWorkLog: (payload) =>
         request("/work-logs/start", {
             method: "POST",
-            body: JSON.stringify({ workOrderId, workerId, startTime }),
+            body: JSON.stringify(payload),
         }),
-    pauseWorkLog: (id, pausedAt) =>
-        request(`/work-logs/${id}/pause`, {
-            method: "POST",
-            body: JSON.stringify({ pausedAt }),
-        }),
+
+    // pauseReasonId 추가
+    pauseWorkLog: (id, pausedAt, pauseReasonId) =>
+    request(`/work-logs/${id}/pause`, {
+        method: "POST",
+        body: JSON.stringify({ pausedAt, pauseReasonId }),
+    }),
     resumeWorkLog: (id, resumedAt) =>
         request(`/work-logs/${id}/resume`, {
             method: "POST",
@@ -183,6 +189,25 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ endTime, actualQty }),
         }),
+
+        // GET /api/work-logs/active?workerId=1
+        //   활성 건이 없으면 서버가 204를 주고, request()가 그걸 null로 바꿔준다
+        //   → 화면에서 activeLog가 null이면 "작업 시작" 카드가 뜬다
+        getActiveWorkLog: (workerId) =>
+            request(`/work-logs/active?workerId=${workerId}`),
+
+        // GET /api/work-orders/open?workerId=1
+        //   이어하기 목록. 이어할 게 없으면 빈 배열 []
+        getOpenWorkOrders: (workerId) =>
+            request(`/work-orders/open?workerId=${workerId}`),
+
+        // GET /api/pause-reasons
+        //   정지 다이얼로그의 사유 드롭다운용
+        getPauseReasons: () => request("/pause-reasons"),
+
+        // DELETE /api/work-logs/{id}
+        deleteWorkLog: (id) =>
+            request(`/work-logs/${id}`, { method: "DELETE" }),
 
     getWorkLogDetail: (id) => request(`/work-logs/${id}`),
     getTimeline: (date) => request(`/work-logs/timeline?date=${date}`),

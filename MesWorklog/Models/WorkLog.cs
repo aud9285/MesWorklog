@@ -65,7 +65,7 @@ namespace MesWorklog.Models
 
         // 작업 중지(IN_PROGRESS 상태에만 작업중지 가능)
         // 연속정지 방지
-        public void Pause(DateTime pausedAt, int pauseReasonId, DateTime now)
+        public void Pause(DateTime pausedAt, PauseReason pauseReason, DateTime now)
         {
             if (Status != WorkLogStatus.InProgress)
                 throw new InvalidWorkLogStateException("진행중 상태에서만 정지할 수 있습니다.");
@@ -84,9 +84,11 @@ namespace MesWorklog.Models
             if (pausedAt <= lastResumedAt)
                 throw new InvalidTimeInputException("정지 시각은 직전 시작/재개 시각보다 이후여야 합니다.");
 
-            
+
             // 정지 이력 1건 추가. WorkLog = this로 네비게이션만 세팅(Id는 저장 전이라 0일 수 있어 FK로 직접 안 씀)
-            Pauses.Add(new WorkLogPause { PauseReasonId = pauseReasonId, PausedAt = pausedAt, WorkLog = this });
+            // PauseReason 네비게이션까지 바로 채워서 저장 — Complete()가 이후 이 WorkLog를 어떤 쿼리
+            // 모양으로 불러오든 p.PauseReason.Category를 안전하게 읽을 수 있음 (더 이상 .ThenInclude에 의존 안 함)
+            Pauses.Add(new WorkLogPause { PauseReason = pauseReason, PausedAt = pausedAt, WorkLog = this });
             Status = WorkLogStatus.Paused;
         }
 

@@ -1,6 +1,109 @@
 @MesWorklog_HostAddress = http://localhost:5201
 
-GET {{MesWorklog_HostAddress}}/weatherforecast/
-Accept: application/json
+### ① 신규 생성 — 유효한 라인-공정 조합
+# @name start1
+POST {{MesWorklog_HostAddress}}/api/work-logs/start
+Content-Type: application/json
+
+{
+  "workerId": 1,
+  "startTime": "2026-08-11T09:00:00",
+  "lineId": 1,
+  "processId": 1,
+  "targetQty": 100
+}
+
+### ② 유효하지 않은 라인-공정 조합 → 409 기대
+POST {{MesWorklog_HostAddress}}/api/work-logs/start
+Content-Type: application/json
+
+{
+  "workerId": 2,
+  "startTime": "2026-08-11T09:00:00",
+  "lineId": 1,
+  "processId": 99,
+  "targetQty": 100
+}
+
+### ③ 같은 작업자로 중복 시작 시도 → 409 기대 (①을 먼저 실행해야 함)
+POST {{MesWorklog_HostAddress}}/api/work-logs/start
+Content-Type: application/json
+
+{
+  "workerId": 1,
+  "startTime": "2026-08-11T09:10:00",
+  "lineId": 1,
+  "processId": 1,
+  "targetQty": 50
+}
+
+### ④ 이어하기 — ①의 응답에서 workOrderId를 자동으로 받아 재사용 (다른 작업자로)
+# start1 요청을 먼저 실행해야 workOrderId 값이 채워짐
+POST {{MesWorklog_HostAddress}}/api/work-logs/start
+Content-Type: application/json
+
+{
+  "workerId": 3,
+  "startTime": "2026-08-11T09:20:00",
+  "workOrderId": {{start1.response.body.$.workOrderId}}
+}
+
+### ⑤ 정지 — ①에서 시작한 작업이력(start1)을 정지. pauseReasonId는 DBeaver로 확인한 실제 값으로 바꿀 것
+# @name pause1
+POST {{MesWorklog_HostAddress}}/api/work-logs/{{start1.response.body.$.id}}/pause
+Content-Type: application/json
+
+{
+  "pausedAt": "2026-08-11T10:00:00",
+  "pauseReasonId": 1
+}
+
+### ⑥ 재개 — ⑤에서 정지한 걸 재개
+POST {{MesWorklog_HostAddress}}/api/work-logs/{{start1.response.body.$.id}}/resume
+Content-Type: application/json
+
+{
+  "resumedAt": "2026-08-11T10:30:00"
+}
+
+### ⑦ 완료 — 실적수량과 함께 종료. 응답에 elapsedMinutes/operatingMinutes/netOperatingMinutes가 채워지는지 확인
+POST {{MesWorklog_HostAddress}}/api/work-logs/{{start1.response.body.$.id}}/complete
+Content-Type: application/json
+
+{
+  "endTime": "2026-08-11T12:00:00",
+  "actualQty": 80
+}
+
+### ⑧ 정지중 완료 시도 가드 확인용 — 별도 이력을 새로 하나 시작 (①~⑦ 흐름을 건드리지 않기 위해 다른 작업자로)
+# @name startForGuard
+POST {{MesWorklog_HostAddress}}/api/work-logs/start
+Content-Type: application/json
+
+{
+  "workerId": 4,
+  "startTime": "2026-08-11T09:00:00",
+  "lineId": 1,
+  "processId": 1,
+  "targetQty": 100
+}
+
+### ⑨ ⑧에서 시작한 걸 정지
+POST {{MesWorklog_HostAddress}}/api/work-logs/{{startForGuard.response.body.$.id}}/pause
+Content-Type: application/json
+
+{
+  "pausedAt": "2026-08-11T09:30:00",
+  "pauseReasonId": 1
+}
+
+### ⑩ 정지중인 상태에서 완료 시도 → 409("진행중 상태에서만 완료할 수 있습니다.") 기대
+POST {{MesWorklog_HostAddress}}/api/work-logs/{{startForGuard.response.body.$.id}}/complete
+Content-Type: application/json
+
+{
+  "endTime": "2026-08-11T12:00:00",
+  "actualQty": 50
+}
 
 ###

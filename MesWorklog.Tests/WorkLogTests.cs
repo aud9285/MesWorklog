@@ -1,4 +1,4 @@
-﻿using MesWorklog.Exceptions;
+using MesWorklog.Exceptions;
 using MesWorklog.Models;
 
 namespace MesWorklog.Tests;
@@ -11,13 +11,9 @@ public class WorkLogTests
     // 자주 쓰는 시각을 짧게 쓰기 위해서
     private static DateTime At(int hour, int minute = 0) => new(2026, 8, 9, hour, minute, 0);
 
-    // 정지 이력의 PauseReason 네비게이션을 수동으로 채운다.
-    // Pause()가 FK만 채우고 네비게이션은 비워두는데,
-    // Complete()는 p.PauseReason.Category를 읽으므로 이게 없으면 NullReferenceException.
-    // 운영에서는 서비스의 .ThenInclude(p => p.PauseReason)가 이 역할을 한다
-    private static void SetCategory(WorkLog log, int index, PauseCategory category)
-        => log.Pauses.ElementAt(index).PauseReason =
-               new PauseReason { Name = "테스트사유", Category = category };
+    // 테스트용 정지사유 — Category가 중요하지 않은 테스트는 기본값(Planned)을 씀
+    private static PauseReason Reason(PauseCategory category = PauseCategory.Planned)
+        => new PauseReason { Name = "테스트사유", Category = category };
 
     // ── Start ────────────────────────────────────────────────
 
@@ -50,7 +46,7 @@ public class WorkLogTests
     {
         var log = WorkLog.Start(1, 1, At(9), Now);
 
-        log.Pause(pausedAt: At(10), pauseReasonId: 1, now: Now);
+        log.Pause(pausedAt: At(10), pauseReason: Reason(), now: Now);
 
         Assert.Equal(WorkLogStatus.Paused, log.Status);
         var pause = Assert.Single(log.Pauses);
@@ -63,9 +59,9 @@ public class WorkLogTests
     {
         // 정지를 연달아 호출하면 열린 정지가 2건 이상 생겨 시간 계산이 무한정 커졌다
         var log = WorkLog.Start(1, 1, At(9), Now);
-        log.Pause(At(10), 1, Now);
+        log.Pause(At(10), Reason(), Now);
 
-        Assert.Throws<InvalidWorkLogStateException>(() => log.Pause(At(11), 1, Now));
+        Assert.Throws<InvalidWorkLogStateException>(() => log.Pause(At(11), Reason(), Now));
     }
 
     [Fact]
@@ -73,11 +69,11 @@ public class WorkLogTests
     {
         // 정지 구간이 서로 겹치면 합산이 중복돼 가동률이 왜곡된다
         var log = WorkLog.Start(1, 1, At(9), Now);
-        log.Pause(At(10), 1, Now);
+        log.Pause(At(10), Reason(), Now);
         log.Resume(At(10, 30), Now);
 
         // 10:30에 재개했는데 10:20에 정지 → 겹침
-        Assert.Throws<InvalidTimeInputException>(() => log.Pause(At(10, 20), 1, Now));
+        Assert.Throws<InvalidTimeInputException>(() => log.Pause(At(10, 20), Reason(), Now));
     }
 
     // ── Resume ───────────────────────────────────────────────
@@ -86,7 +82,7 @@ public class WorkLogTests
     public void 재개하면_열린_정지가_닫히고_진행중이_된다()
     {
         var log = WorkLog.Start(1, 1, At(9), Now);
-        log.Pause(At(10), 1, Now);
+        log.Pause(At(10), Reason(), Now);
 
         log.Resume(At(10, 30), Now);
 
@@ -112,7 +108,7 @@ public class WorkLogTests
         // ElapsedMinutes에는 포함돼 가동률이 100%로 부풀려졌다.
         // 가드를 IN_PROGRESS로 좁혔다
         var log = WorkLog.Start(1, 1, At(9), Now);
-        log.Pause(At(10), 1, Now);
+        log.Pause(At(10), Reason(), Now);
 
         Assert.Throws<InvalidWorkLogStateException>(() => log.Complete(At(12), 10, Now));
     }
@@ -121,7 +117,7 @@ public class WorkLogTests
     public void 종료_시각은_마지막_기록_시각보다_이후여야_한다()
     {
         var log = WorkLog.Start(1, 1, At(9), Now);
-        log.Pause(At(10), 1, Now);
+        log.Pause(At(10), Reason(), Now);
         log.Resume(At(11), Now);
 
         // 11:00에 재개했는데 10:30에 종료 → 시간 역전
@@ -149,14 +145,11 @@ public class WorkLogTests
         // 09:00 시작 → 10:00~10:30 식사(계획정지 30분) → 11:00~11:20 고장(비가동 20분) → 12:00 완료
         var log = WorkLog.Start(1, 1, At(9), Now);
 
-        log.Pause(At(10), pauseReasonId: 1, now: Now);
+        // Pause() 호출 시점에 바로 카테고리를 넘김 — 예전 SetCategory 후처리가 더 이상 필요 없음
+        log.Pause(At(10), Reason(PauseCategory.Planned), Now);     // 식사
         log.Resume(At(10, 30), Now);
-        log.Pause(At(11), pauseReasonId: 2, now: Now);
+        log.Pause(At(11), Reason(PauseCategory.Unplanned), Now);   // 설비 고장
         log.Resume(At(11, 20), Now);
-
-        // Complete()가 카테고리를 읽기 전에 네비게이션을 채워둔다(위 SetCategory 설명 참고)
-        SetCategory(log, 0, PauseCategory.Planned);     // 식사
-        SetCategory(log, 1, PauseCategory.Unplanned);   // 설비 고장
 
         log.Complete(At(12), 10, Now);
 

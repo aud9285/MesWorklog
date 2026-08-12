@@ -16,11 +16,16 @@ builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 // Exception 핸들러 등록(GlobalExceptionHandler)
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-// Serviced
+// Services
 builder.Services.AddScoped<LineService>();
 builder.Services.AddScoped<ProcessService>();
 builder.Services.AddScoped<WorkerService>();
 builder.Services.AddScoped<EquipmentService>();
+builder.Services.AddScoped<WorkLogService>();
+builder.Services.AddScoped<WorkOrderService>();
+builder.Services.AddScoped<PauseReasonService>();
+
+
 
 var connectionString = builder.Configuration.GetConnectionString("MesDb")!;
 builder.Services.AddDbContext<AppDbContext>(options =>

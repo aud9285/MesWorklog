@@ -122,7 +122,7 @@ namespace MesWorklog.Services
 
             foreach (var processId in toDelete)
             {
-                var row = await _db.WorkerProcesses.FindAsync(processId, id);
+                var row = await _db.WorkerProcesses.FindAsync(id, processId);
                 if (row != null) _db.WorkerProcesses.Remove(row);
             }
 
