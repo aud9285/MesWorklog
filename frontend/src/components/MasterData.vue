@@ -23,19 +23,6 @@
  * 【조인 체크 해제에 확인 팝업을 붙이지 않는 이유】 (§6-1)
  *  "1라인에 검사공정이 매핑돼 있었다"는 관계 데이터라 잃는 정보가 없다.
  *  확인창을 남발하면 정작 위험한 삭제의 경고력이 떨어진다.
- *
- * ────────────────────────────────────────────────────────────────
- * TODO(연동) — 이 화면이 사용할 API (탭마다 동일한 패턴)
- *   GET    /api/lines?includeInactive={bool}
- *   POST   /api/lines                 {name}
- *   PUT    /api/lines/{id}            {name, isActive}     ← isActive:true 로 보내면 복구
- *   DELETE /api/lines/{id}            → {result:'deleted'} 또는 {result:'deactivated', historyCount}
- *
- *   processes / workers / equipment 도 경로만 다르고 형태는 같다.
- *   공정은 요청/응답에 lineIds, 작업자는 processIds 가 추가된다.
- *   조인 갱신은 체크된 id 목록 전체를 보내면 서버가 diff 로 변경분만 반영한다 (§4-11).
- *
- *   에러: 이름 중복이면 409 + ProblemDetails. body.detail 을 그대로 토스트에 띄우면 된다.
  * ════════════════════════════════════════════════════════════════ */
 
 import { ref, computed, onMounted } from 'vue';

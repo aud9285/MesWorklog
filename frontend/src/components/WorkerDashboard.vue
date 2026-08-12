@@ -29,32 +29,7 @@
  *   - 라인→공정 캐스케이딩     → 서버도 LineProcess 조합 검증 (§4-8)
  *
  * ────────────────────────────────────────────────────────────────
- * TODO(연동) — 이 화면이 사용할 API
- *   GET  /api/workers                        → 작업자 목록 (상단 선택, IsActive 필터 적용)
- *   GET  /api/work-logs/active?workerId={id} ★ 신규 필요 — 그 작업자의 활성 건 (없으면 null/204)
- *   GET  /api/lines                          → 라인 목록
- *   GET  /api/processes?lineId={id}          → 선택 라인의 공정 목록
- *   GET  /api/equipment                      → 설비 목록 (선택 사항, 수작업이면 비움)
- *   GET  /api/pause-reasons                  → 정지사유 목록 (계획정지/비가동)
- *   GET  /api/work-orders/open?workerId={id} → 이어하기용 미완료 작업지시
- *        ※ 설계 §5 는 ?processId= 였는데, 화면이 작업자 기준으로 바뀌면서 맞지 않는다.
- *          작업자가 공정 2~3개에 배정돼 있으면 공정마다 호출해 프론트에서 합쳐야 하므로,
- *          서버가 WorkerProcess 를 조인해 한 번에 주는 편이 낫다.
- *          응답에 activeWorkerCount(지금 붙어 있는 작업자 수)를 포함하면
- *          "합류할지 / 이어받을지"를 카드에서 바로 판단할 수 있다.
- *   POST /api/work-logs/start                → 신규    : {workerId, startTime, lineId, processId, equipmentId?, targetQty}
- *                                              이어하기 : {workerId, startTime, workOrderId}
- *   POST /api/work-logs/{id}/pause           → {pausedAt, pauseReasonId}
- *   POST /api/work-logs/{id}/resume          → {resumedAt}
- *   POST /api/work-logs/{id}/complete        → {endTime, actualQty}
- *   DELETE /api/work-logs/{id}               → 오입력 / 방치된 이력 삭제
- *
- *   에러 처리: 위반 시 409(또는 400) + ProblemDetails 가 온다.
- *   body.detail 이 사용자에게 보여줄 문장이므로 그대로 토스트에 띄우면 된다.
- * ════════════════════════════════════════════════════════════════ */
 
-import { ref, computed, watch } from 'vue';
-import { useToast } from 'primevue/usetoast';
 
 /* ── 사용하는 PrimeVue 위젯 ──────────────────────────────────
  * Card        : 제목/본문/푸터 슬롯을 가진 카드 컨테이너 (#title #content #footer)
@@ -91,18 +66,22 @@ import {
   hhmm, duration, minutesBetween, toLocalIso, floorTo10Minutes,
   STATUS_LABEL, STATUS_SEVERITY, CATEGORY_LABEL,
 } from '../utils/format.js';
+import {api} from '../client.js';
 import * as mock from '../mock/index.js';
 
 const toast = useToast();
 
 /* ── 마스터 데이터 ───────────────────────────────────────────
- * TODO(연동) onMounted 에서 api 호출 결과로 채운다 */
-const workers = ref(mock.workers.filter((w) => w.isActive));
-const lines = ref(mock.lines.filter((l) => l.isActive));
-const allProcesses = ref(mock.processes);
-const equipments = ref(mock.equipments.filter((e) => e.isActive));
-const pauseReasons = ref(mock.pauseReasons);
-const openOrders = ref(mock.openWorkOrders);
+ * onMounted 에서 api 호출 결과로 채운다 */
+const workers = ref([]);
+const lines = ref([]);
+const allProcesses = ref([]);
+const equipments = ref([]);
+const pauseReasons = ref([]);
+// 이어하기 목록은 workerId 기준이라 작업자를 고를때마다 불러옴
+const openOrders = ref([]);
+
+const loading = ref(false);
 
 /* ══ ① 작업자 선택 ═══════════════════════════════════════ */
 const workerId = ref(null);
@@ -113,11 +92,42 @@ const selectedWorker = computed(
 
 /* ══ ② 그 작업자의 활성 건 ═══════════════════════════════
  * null 이면 "작업 시작" 카드가, 값이 있으면 "진행중 작업" 카드가 보인다.
- * TODO(연동) const activeLog = ref(null) 로 바꾸고,
  *   watch(workerId) 에서 GET /api/work-logs/active?workerId= 결과를 대입한다 */
-const activeLog = computed(() =>
-  workerId.value ? (mock.activeLogsByWorker[workerId.value] ?? null) : null,
-);
+const activeLog = ref(null);
+
+/* 작업자 선택 시 + 시작/정지/재개/완료/삭제 직후에 호출해 화면을 최신 상태로 맞춘다 */
+async function loadActiveLog() {
+  if (!workerId.value) {
+    activeLog.value = null;
+    return;
+  }
+  try {
+    activeLog.value = await api.getActiveWorkLog(workerId.value);
+  } catch (err) {
+    activeLog.value = null;
+    toast.add({
+      severity: 'error', summary: '작업 상태를 불러오지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
+}
+
+/* 이어하기 목록도 작업자 기준이라 같이 갱신한다 */
+async function loadOpenOrders() {
+  if (!workerId.value) {
+    openOrders.value = [];
+    return;
+  }
+  try {
+    openOrders.value = await api.getOpenWorkOrders(workerId.value);
+  } catch (err) {
+    openOrders.value = [];
+    toast.add({
+      severity: 'error', summary: '이어할 작업을 불러오지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
+}
 
 const isPaused = computed(() => activeLog.value?.status === 'Paused');
 const isRunning = computed(() => activeLog.value?.status === 'InProgress');
@@ -132,6 +142,33 @@ const elapsedMinutes = computed(() =>
   activeLog.value ? minutesBetween(activeLog.value.startTime, null) : 0,
 );
 
+/* 목록 API는 기본이 활성 항목만 반환하므로(includeInactive=false)
+ * 예전 mock에서 하던 .filter(isActive)가 더 이상 필요 없다 */
+async function loadMasters() {
+  try {
+    // 서로 의존하지 않는 요청이라 병렬로 보낸다 (순차로 하면 왕복 시간이 4배)
+    const [w, l, p, e, r] = await Promise.all([
+      api.getWorkers(),
+      api.getLines(),
+      api.getProcesses(),
+      api.getEquipments(),
+      api.getPauseReasons(),
+    ]);
+    workers.value = w;
+    lines.value = l;
+    allProcesses.value = p;
+    equipments.value = e;
+    pauseReasons.value = r;
+  } catch (err) {
+    toast.add({
+      severity: 'error', summary: '기본 정보를 불러오지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
+}
+
+onMounted(loadMasters);
+
 /* ══ ③ 시작 폼 ═══════════════════════════════════════════ */
 const continueMode = ref(false);   // 이어하기 토글
 const lineId = ref(null);
@@ -140,20 +177,22 @@ const equipmentId = ref(null);
 const targetQty = ref(100);
 const selectedOrderId = ref(null);
 
-/* 작업자가 바뀌면 이전 선택은 의미가 없으므로 폼을 비운다 */
-watch(workerId, () => {
+/* 작업자가 바뀌면 이전 선택은 의미가 없으므로 폼을 비우고, 그 작업자 기준 데이터를 다시 불러온다 */
+watch(workerId, async () => {
   lineId.value = null;
   processId.value = null;
   equipmentId.value = null;
   selectedOrderId.value = null;
-  // TODO(연동) 여기서 활성 건 조회
+
+  loading.value = true;
+  // 서로 독립적이라 병렬로
+  await Promise.all([loadActiveLog(), loadOpenOrders()]);
+  loading.value = false;
 });
 
 /* 공정 후보 = 선택한 라인에 속하면서(§4-8) + 이 작업자가 배정된 공정(§4-7)
  * 두 조건을 모두 만족해야 한다. 배정되지 않은 공정으로 시작하면
- * "누가 어느 공정에서 일하는가"라는 마스터데이터와 실적이 어긋난다.
- * TODO(연동) 서버에서 GET /api/processes?lineId= 로 받은 뒤
- *   selectedWorker.processIds 로 한 번 더 거르면 된다 */
+ * "누가 어느 공정에서 일하는가"라는 마스터데이터와 실적이 어긋난다. */
 const processOptions = computed(() => {
   if (!lineId.value || !selectedWorker.value) return [];
   return allProcesses.value.filter(
@@ -163,13 +202,8 @@ const processOptions = computed(() => {
   );
 });
 
-/* 이어하기 목록도 이 작업자가 배정된 공정의 작업지시만 보여준다 */
-const myOpenOrders = computed(() => {
-  if (!selectedWorker.value) return [];
-  return openOrders.value.filter(
-    (o) => selectedWorker.value.processIds.includes(o.processId),
-  );
-});
+/* 이어하기 목록도 이 작업자가 배정된 공정의 미완료 작업지시만 보여준다 */
+const myOpenOrders = computed(() => openOrders.value);
 
 /* 라인이 바뀌면 하위 선택을 비운다 — 남아 있으면 유효하지 않은 조합이 만들어진다 */
 function onLineChange() {
@@ -229,7 +263,7 @@ const canConfirmTime = computed(
   () => timeMode.value !== 'pause' || !!pickedReasonId.value,
 );
 
-function confirmTime() {
+async function confirmTime() {
   const iso = toLocalIso(pickedTime.value);
 
   if (timeMode.value === 'complete') {
@@ -239,25 +273,62 @@ function confirmTime() {
     return;
   }
 
-  // TODO(연동) 아래 분기에서 각각 api 호출 후 활성 건을 다시 조회한다.
-  //   start  : POST /api/work-logs/start  (continueMode 에 따라 payload 가 다름)
-  //   pause  : POST /api/work-logs/{id}/pause   {pausedAt: iso, pauseReasonId: pickedReasonId}
-  //   resume : POST /api/work-logs/{id}/resume  {resumedAt: iso}
-  //   실패 시 err.detail 을 그대로 토스트 severity:'error' 로 띄운다.
-  //   아래 성공 문구는 연동 후에도 그대로 쓰면 된다 (호출부만 교체)
-  const done = {
-    start: '작업을 시작했습니다.',
-    pause: '작업을 일시정지했습니다.',
-    resume: '작업을 다시 시작했습니다.',
-  }[timeMode.value];
+  try {
+    if (timeMode.value === 'start') {
+      // 이어하기 여부에 따라 payload 모양이 다르다
+      // 이어하기 : 기존 작업지시에 합류 → workOrderId만
+      // 신규 : 작업지시를 새로 만들며 시작 → 라인·공정·설비·목표수량
+      const payload = continueMode.value
+        ? {
+            workerId: workerId.value,
+            startTime: iso,
+            workOrderId: selectedOrderId.value,
+          }
+        : {
+            workerId: workerId.value,
+            startTime: iso,
+            lineId: lineId.value,
+            processId: processId.value,
+            equipmentId: equipmentId.value,   // 수작업이면 null 그대로 보냄
+            targetQty: targetQty.value,
+          };
 
-  toast.add({
-    severity: 'success',
-    summary: done,
-    detail: `${hhmm(iso)} 기준으로 기록되었습니다.`,
-    life: 2500,
-  });
-  timeDialog.value = false;
+      await api.startWorkLog(payload);
+    }
+    else if (timeMode.value === 'pause') {
+      // 정지 대상은 지금 화면에 떠 있는 활성 건.
+      // 사유는 다이얼로그에서 고른 값(pickedReasonId) — canConfirmTime이 미선택을 막아준다
+      await api.pauseWorkLog(activeLog.value.id, iso, pickedReasonId.value);
+    }
+    else if (timeMode.value === 'resume') {
+      // 재개는 시각만 보내면 된다. 어느 정지를 닫을지는 서버가 판단한다
+      // (WorkLog.Resume이 ResumedAt == null인 열린 정지를 찾아서 닫음)
+      await api.resumeWorkLog(activeLog.value.id, iso);
+    }
+
+    // 성공했으면 상태가 바뀌었으므로 다시 조회 → 카드 버튼 구성이 바뀐다
+    await loadActiveLog();
+
+    const done = {
+      start: '작업을 시작했습니다.',
+      pause: '작업을 일시정지했습니다.',
+      resume: '작업을 다시 시작했습니다.',
+    }[timeMode.value];
+
+    toast.add({
+      severity: 'success',
+      summary: done,
+      detail: `${hhmm(iso)} 기준으로 기록되었습니다.`,
+      life: 2500,
+    });
+    timeDialog.value = false;
+  } catch (err) {
+    // 409(중복 시작, 조합 오류) / 400(미래 시각) 문구가 err.message에 담겨 온다
+    toast.add({
+      severity: 'error', summary: '처리하지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
 }
 
 /* ══ 완료 2단계: 실적 수량 ═══════════════════════════════ */
@@ -274,33 +345,62 @@ const qtyOver = computed(() => {
   return Math.max(0, total - activeLog.value.targetQty);
 });
 
-function confirmComplete() {
-  // TODO(연동) POST /api/work-logs/{id}/complete  {endTime: toLocalIso(pickedTime), actualQty}
-  //   성공하면 활성 건이 사라지므로 시작 폼으로 돌아간다.
-  //   실적 수량은 서버에서 검증하지 않으므로 DTO 에 [Range(0, ...)] 를 걸어야 한다
-  toast.add({
-    severity: 'success',
-    summary: '작업을 완료했습니다.',
-    detail: `${hhmm(toLocalIso(pickedTime.value))} 종료 · 실적 ${actualQty.value}개`,
-    life: 3000,
-  });
-  qtyDialog.value = false;
-  actualQty.value = 0;
+async function confirmComplete() {
+  try {
+    // 종료 시각은 앞 다이얼로그에서 고른 pickedTime, 실적 수량은 이 다이얼로그의 actualQty
+    await api.completeWorkLog(
+      activeLog.value.id,
+      toLocalIso(pickedTime.value),
+      actualQty.value,
+    );
+
+    toast.add({
+      severity: 'success',
+      summary: '작업을 완료했습니다.',
+      detail: `${hhmm(toLocalIso(pickedTime.value))} 종료 · 실적 ${actualQty.value}개`,
+      life: 3000,
+    });
+
+    qtyDialog.value = false;
+    actualQty.value = 0;
+
+    // 완료되면 활성 건이 사라지므로 null이 되고, 화면이 "작업 시작" 카드로 돌아간다.
+    // 이어하기 목록도 갱신 — 이 작업으로 목표를 채웠다면 그 작업지시가 목록에서 빠져야 한다
+    await Promise.all([loadActiveLog(), loadOpenOrders()]);
+  } catch (err) {
+    // 정지중 완료 시도(409), 시간 역전(400) 등
+    toast.add({
+      severity: 'error', summary: '완료하지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
 }
 
 /* ══ 삭제 ════════════════════════════════════════════════
  * 오입력이나 종료를 잊고 방치된 이력을 지우는 경로 (§8-3) */
 const deleteDialog = ref(false);
 
-function confirmDelete() {
-  // TODO(연동) DELETE /api/work-logs/{id}
-  //   형제 WorkLog 가 없으면 WorkOrder 도 함께 삭제되고, 남으면 실적이 재계산된다
-  toast.add({
-    severity: 'success',
-    summary: '작업 기록을 삭제했습니다.',
-    life: 2500,
-  });
-  deleteDialog.value = false;
+async function confirmDelete() {
+  try {
+    await api.deleteWorkLog(activeLog.value.id);
+
+    toast.add({
+      severity: 'success',
+      summary: '작업 기록을 삭제했습니다.',
+      life: 2500,
+    });
+
+    deleteDialog.value = false;
+
+    // 삭제됐으니 활성 건이 사라진다.
+    // 형제 이력이 없었다면 작업지시도 함께 지워졌으므로 이어하기 목록도 갱신
+    await Promise.all([loadActiveLog(), loadOpenOrders()]);
+  } catch (err) {
+    toast.add({
+      severity: 'error', summary: '삭제하지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
 }
 </script>
 
