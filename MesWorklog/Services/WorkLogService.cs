@@ -37,6 +37,20 @@ namespace MesWorklog.Services
             if (hasActive)
                 throw new BusinessRuleException("이미 진행 중인 작업이 있어 새로 시작할 수 없습니다.");
 
+            // 작업자 시간 겹침 방지
+            // 완료된 이력에서 겹치는 시간이 있는지 체크
+            // 작업시작시간 >= 완료된건의 시작시간 + 작업시작시간 <= 완료된건의 종료시간일때 에러처리
+            var conflicting = await _db.WorkLogs
+              .Where(w => w.WorkerId == request.WorkerId
+                       && w.Status == WorkLogStatus.Completed
+                       && request.StartTime >= w.StartTime
+                       && request.StartTime < w.EndTime)
+              .FirstOrDefaultAsync();
+
+            if (conflicting != null)
+                throw new BusinessRuleException(
+                    $"{conflicting.StartTime:yyyy-MM-dd HH:mm}~{conflicting.EndTime:HH:mm}에 이미 종료된 작업이 있습니다.");
+
             int workOrderId;
 
             if (request.WorkOrderId.HasValue)
@@ -136,6 +150,33 @@ namespace MesWorklog.Services
                 .Include(w => w.WorkOrder)
                 .FirstOrDefaultAsync(w => w.Id == id)
                 ?? throw new KeyNotFoundException($"작업이력({id})을 찾을 수 없습니다.");
+
+            // 완료시 완료건들중에 겹치는 시간이 있는지 체크
+            // 작업건 시작시간 < 완료건 종료시간 && 작업건 종료시간 > 완료건 시작시간시 에러발생
+
+            // 완료건시작시간 비교 ex
+            // 12:00 ~ 15:00(완료건) 09:00 ~ 12:00(작업건) 정상 case
+            // 09:00 < 15:00 and 12:00 > 12:00 false 통과
+
+            // 12:00 ~ 15:00(완료건) 15:00 ~ 18:00(작업건) 정상 case
+            // 15:00 < 15:00 and 18:00 > 12:00 false 통과
+
+            // 12:00 ~ 15:00(완료건) 09:00 ~ 13:00(작업건) 비정상 case
+            // 09:00 < 15:00 and 13:00 > 12:00 true 에러발생
+
+            // 12:00 ~ 15:00(완료건) 09:00 ~ 18:00(작업건) 비정상 case
+            // 09:00 < 15:00 and 18:00 > 12:00 true 에러발생
+            var overlapping = await _db.WorkLogs
+                .Where(w => w.WorkerId == workLog.WorkerId
+                         && w.Status == WorkLogStatus.Completed
+                         && w.Id != workLog.Id
+                         && workLog.StartTime < w.EndTime      
+                         && w.StartTime < request.EndTime)     
+                .FirstOrDefaultAsync();
+
+            if (overlapping != null)
+                throw new BusinessRuleException(
+                    $"{overlapping.StartTime:yyyy-MM-dd HH:mm}~{overlapping.EndTime:HH:mm}에 이미 종료된 작업과 시간이 겹칩니다.");
 
             workLog.Complete(request.EndTime, request.ActualQty, KoreaTime.Now);
 

@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MesWorklog.Controllers
 {
     [ApiController]
-    [Route("api/pause-reason")]
+    [Route("api/pause-reasons")]
     public class PauseReasonController : ControllerBase
     {
         private readonly PauseReasonService _pauseReasonService;
