@@ -28,6 +28,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useToast } from 'primevue/usetoast';
 
+
 /* ── 사용하는 PrimeVue 위젯 ──────────────────────────────────
  * Tabs/TabList/Tab/TabPanels/TabPanel
  *              : 탭 묶음. v-model:value 에 현재 탭 값을 넣는다.
@@ -59,6 +60,7 @@ import Button from 'primevue/button';
 import Tag from 'primevue/tag';
 import Card from 'primevue/card';
 import {api} from '../client.js';                 // api
+
 import ConfirmDeleteDialog from './common/ConfirmDeleteDialog.vue';
 // import * as mock from '../mock/index.js';         // mock data
 
@@ -190,6 +192,11 @@ const nameHint = computed(() =>
   activeTab.value === 'worker'
     ? '100자 이내로 입력해 주세요.'
     : '100자 이내로 입력해 주세요. 이미 등록된 이름은 사용할 수 없습니다.',
+);
+
+/* 조인 멀티셀렉트의 선택지가 없을 때 문구 — 탭마다 "라인"/"공정"으로 대상이 다르다 */
+const joinEmptyMessage = computed(() =>
+  activeTab.value === 'process' ? '등록된 라인이 없습니다.' : '등록된 공정이 없습니다.',
 );
 
 /* 이번 저장에서 해제되는 조인 id 들 (기존에는 있었는데 지금 체크가 풀린 것).
@@ -394,10 +401,15 @@ async function reactivate(row) {
         <!-- N:M 조합 편집 — 체크된 전체 목록을 보내면 서버가 diff 로 반영한다 (§4-11) -->
         <div v-if="currentTab?.join" class="field">
           <label>{{ currentTab.join.label }}</label>
+          <!-- maxSelectedLabels: 이 개수를 넘으면 칩 대신 "N개 선택됨"으로 뭉쳐서 보여줌.
+               라인/공정 마스터가 몇십 개 수준이라 넉넉히 잡아 사실상 항상 칩으로 보이게 함 -->
           <MultiSelect v-model="form.joinIds" :options="joinOptions"
                        optionLabel="name" optionValue="id"
-                       display="chip" filter :maxSelectedLabels="4"
-                       placeholder="선택 안 함" fluid />
+                       display="chip" filter :maxSelectedLabels="20"
+                       selectedItemsLabel="{0}개 선택됨"
+                       placeholder="선택 안 함" fluid
+                       :emptyMessage="joinEmptyMessage"
+                       emptyFilterMessage="일치하는 항목이 없습니다." />
           <span class="hint">연결만 해제될 뿐, 등록된 정보나 지난 작업 기록은 지워지지 않습니다.</span>
         </div>
 

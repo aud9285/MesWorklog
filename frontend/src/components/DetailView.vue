@@ -249,7 +249,7 @@ function saveEdit() {
         <div class="row wrap g-5">
           <div class="field">
             <label>날짜</label>
-            <DatePicker v-model="date" dateFormat="yy-mm-dd" showIcon iconDisplay="input" />
+            <DatePicker v-model="date" dateFormat="yy-mm-dd" showIcon iconDisplay="input" :manualInput="false" />
           </div>
 
           <div class="field">
@@ -463,19 +463,22 @@ function saveEdit() {
           <div class="field">
             <label>라인</label>
             <Select v-model="editLineId" :options="lines" optionLabel="name" optionValue="id"
-                    placeholder="라인 선택" fluid @change="onEditLineChange" />
+                    placeholder="라인 선택" fluid @change="onEditLineChange"
+                    emptyMessage="등록된 라인이 없습니다." />
           </div>
 
           <div class="field">
             <label>공정</label>
             <Select v-model="editProcessId" :options="editProcessOptions" optionLabel="name" optionValue="id"
-                    placeholder="공정 선택" :disabled="!editLineId" fluid />
+                    placeholder="공정 선택" :disabled="!editLineId" fluid
+                    emptyMessage="선택 가능한 공정이 없습니다." />
           </div>
 
           <div class="field">
             <label>설비 <span class="opt">(선택)</span></label>
             <Select v-model="editEquipmentId" :options="equipments" optionLabel="name" optionValue="id"
-                    placeholder="수작업" showClear fluid />
+                    placeholder="수작업" showClear fluid
+                    emptyMessage="등록된 설비가 없습니다." />
           </div>
         </div>
 

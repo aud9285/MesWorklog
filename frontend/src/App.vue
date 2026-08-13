@@ -10,7 +10,7 @@
  * 각 화면은 useToast() 로 알림을 띄운다. main.js 의 ToastService 등록이 전제다.
  * ════════════════════════════════════════════════════════════════ */
 
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 
 /* Tabs 계열 : 탭 전환. Tab 의 value 와 TabPanel 의 value 가 짝을 이룬다
  * Toast      : 화면 우상단에 뜨는 알림. 위치/개수는 여기 하나로 통제된다 */
@@ -27,6 +27,16 @@ import DetailView from './components/DetailView.vue';
 import MasterData from './components/MasterData.vue';
 
 const activeTab = ref('work');
+
+/* PrimeVue TabPanel은 탭을 나갔다 들어와도 컴포넌트를 없애지 않고 숨겼다 보여주기만 한다.
+ * 그래서 WorkerDashboard의 onMounted(마스터데이터 로딩)는 앱 시작 시 딱 한 번만 실행되고,
+ * 마스터데이터 화면에서 새로 등록해도 현장작업 화면은 그걸 모른다.
+ * key를 바꿔주면 Vue가 기존 인스턴스를 버리고 새로 만들어서, 그때 onMounted가 다시 돈다 —
+ * 즉 "현장작업 탭에 들어올 때마다 새로고침"을 흉내 내는 것 */
+const workerDashboardKey = ref(0);
+watch(activeTab, (tab) => {
+  if (tab === 'work') workerDashboardKey.value++;
+});
 </script>
 
 <template>
@@ -54,7 +64,7 @@ const activeTab = ref('work');
       </TabList>
 
       <TabPanels>
-        <TabPanel value="work"><WorkerDashboard /></TabPanel>
+        <TabPanel value="work"><WorkerDashboard :key="workerDashboardKey" /></TabPanel>
         <TabPanel value="dashboard"><Dashboard /></TabPanel>
         <TabPanel value="detail"><DetailView /></TabPanel>
         <TabPanel value="master"><MasterData /></TabPanel>

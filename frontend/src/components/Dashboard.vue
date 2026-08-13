@@ -160,7 +160,7 @@ const groupLabel = computed(
                       aria-label="이전" @click="shift(-1)" />
               <!-- 기간 단위에 따라 달력이 일/월/연 선택기로 바뀐다 -->
               <DatePicker v-model="baseDate" :view="datePickerView" :dateFormat="dateFormat"
-                          showIcon iconDisplay="input" />
+                          showIcon iconDisplay="input" :manualInput="false" />
               <Button icon="pi pi-chevron-right" text severity="secondary" size="small"
                       aria-label="다음" @click="shift(1)" />
             </div>

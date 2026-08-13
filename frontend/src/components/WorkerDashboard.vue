@@ -39,6 +39,8 @@
  *               disabled 로 잠그면 캐스케이딩(상위 미선택 시 하위 비활성)이 된다
  *               showClear 는 선택 해제(X) 버튼 → 설비처럼 nullable 인 항목에 사용
  *               #option 슬롯으로 항목 생김새를 직접 그린다 → 정지사유에 분류 배지 표시
+ * InputText   : 한 줄 텍스트 입력. readonly 를 주면 편집은 막고 값 표시 용도로만 쓴다
+ *               (시각 선택 팝업에서 시작 시각을 참고용으로 보여줄 때 사용)
  * InputNumber : 숫자 전용 입력. showButtons 로 +/- 스피너, min 으로 하한
  * Button      : 버튼. severity=색(warn/success/danger), text=배경 없음, icon=아이콘
  * Tag         : 상태 배지. severity 에 따라 색이 바뀐다 (진행중=info, 정지중=warn, 완료=success)
@@ -54,6 +56,7 @@
  * ─────────────────────────────────────────────────────────── */
 import Card from 'primevue/card';
 import Checkbox from 'primevue/checkbox';
+import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
 import InputNumber from 'primevue/inputnumber';
 import Button from 'primevue/button';
@@ -62,10 +65,14 @@ import Dialog from 'primevue/dialog';
 import DatePicker from 'primevue/datepicker';
 
 import ConfirmDeleteDialog from './common/ConfirmDeleteDialog.vue';
+import { ref, watch, computed, onMounted } from 'vue';
+
 import {
-  hhmm, duration, minutesBetween, toLocalIso, floorTo10Minutes,
+  hhmm, mmddhhmm, duration, minutesBetween, toLocalIso, floorTo10Minutes,
   STATUS_LABEL, STATUS_SEVERITY, CATEGORY_LABEL,
 } from '../utils/format.js';
+import { useToast } from 'primevue/usetoast';
+
 import {api} from '../client.js';
 import * as mock from '../mock/index.js';
 
@@ -418,7 +425,9 @@ async function confirmDelete() {
           <div class="field" style="min-width: 200px">
             <label>작업자</label>
             <Select v-model="workerId" :options="workers" optionLabel="name" optionValue="id"
-                    placeholder="작업자를 선택하세요" filter />
+                    placeholder="작업자를 선택하세요" filter
+                    emptyMessage="등록된 작업자가 없습니다."
+                    emptyFilterMessage="일치하는 작업자가 없습니다." />
           </div>
 
           <!-- 선택한 작업자의 현재 상태를 한눈에 -->
@@ -456,7 +465,8 @@ async function confirmDelete() {
           <div class="field">
             <label>라인</label>
             <Select v-model="lineId" :options="lines" optionLabel="name" optionValue="id"
-                    placeholder="라인 선택" @change="onLineChange" />
+                    placeholder="라인 선택" @change="onLineChange"
+                    emptyMessage="등록된 라인이 없습니다." />
           </div>
 
           <!-- 라인을 먼저 고르지 않으면 공정을 못 고른다 → 잘못된 조합 자체가 선택 불가 (§4-8)
@@ -464,14 +474,16 @@ async function confirmDelete() {
           <div class="field">
             <label>공정</label>
             <Select v-model="processId" :options="processOptions" optionLabel="name" optionValue="id"
-                    placeholder="공정 선택" :disabled="!lineId" />
+                    placeholder="공정 선택" :disabled="!lineId"
+                    emptyMessage="선택 가능한 공정이 없습니다." />
           </div>
 
           <!-- 설비는 선택 사항 — 수작업 공정도 있어서 nullable 이다 -->
           <div class="field">
             <label>설비 <span class="opt">(선택)</span></label>
             <Select v-model="equipmentId" :options="equipments" optionLabel="name" optionValue="id"
-                    placeholder="수작업" showClear />
+                    placeholder="수작업" showClear
+                    emptyMessage="등록된 설비가 없습니다." />
           </div>
 
           <div class="field" style="min-width: 130px">
@@ -544,7 +556,7 @@ async function confirmDelete() {
           <div class="row wrap g-3">
             <div class="metric">
               <div class="k">시작</div>
-              <div class="v num">{{ hhmm(activeLog.startTime) }}</div>
+              <div class="v num">{{ mmddhhmm(activeLog.startTime) }}</div>
             </div>
             <div class="metric">
               <div class="k">시작 후 경과</div>
@@ -622,11 +634,20 @@ async function confirmDelete() {
     <Dialog v-model:visible="timeDialog" modal :header="timeDialogHeader"
             :style="{ width: '360px' }" :draggable="false">
       <div class="col g-3">
+        <!-- 정지/재개/완료일 때만 — 시작 시각을 참고할 수 있게 readonly로 띄워둔다.
+             입력창이 아니라 그냥 정보 표시용이라 InputText가 아니라 읽기 전용 텍스트로 둔다.
+             서버가 "직전 기록 시각보다 이후여야 한다"고 검증하는 그 기준을 미리 눈으로 보여주는 것 -->
+        <div v-if="timeMode !== 'start'" class="field">
+          <label>시작 시각</label>
+          <InputText :modelValue="mmddhhmm(activeLog?.startTime)" readonly fluid />
+        </div>
+
         <!-- 일시정지일 때만 사유 선택. 계획정지/비가동 분류가 가동률 계산을 가른다 (§3-4) -->
         <div v-if="timeMode === 'pause'" class="field">
           <label>정지 사유</label>
           <Select v-model="pickedReasonId" :options="pauseReasons" optionValue="id"
-                  optionLabel="name" placeholder="사유 선택" fluid>
+                  optionLabel="name" placeholder="사유 선택" fluid
+                  emptyMessage="등록된 정지 사유가 없습니다.">
             <template #option="{ option }">
               <div class="row between g-3" style="width: 100%">
                 <span>{{ option.name }}</span>
@@ -641,9 +662,12 @@ async function confirmDelete() {
         <div class="field">
           <label>시각</label>
           <!-- 분은 10분 단위(§3-1), 기본값은 현재 시각을 10분 단위로 내린 값.
-               maxDate 로 미래 날짜·시각을 아예 고를 수 없게 막는다(§3-3의 1차 차단) -->
+               maxDate 로 미래 날짜·시각을 아예 고를 수 없게 막는다(§3-3의 1차 차단).
+               manualInput=false: 텍스트로 직접 타이핑하면 10분 단위·미래시각 제한이
+               전부 우회되고 형식도 안 맞아 파싱이 안 되므로, 캘린더 클릭으로만 고르게 막는다 -->
           <DatePicker v-model="pickedTime" showTime hourFormat="24" :stepMinute="10"
-                      :maxDate="maxTime" showIcon iconDisplay="input" fluid />
+                      :maxDate="maxTime" showIcon iconDisplay="input" fluid
+                      :manualInput="false" />
           <span class="hint">10분 단위로 선택할 수 있으며, 지금보다 이후 시각은 고를 수 없습니다.</span>
         </div>
       </div>
