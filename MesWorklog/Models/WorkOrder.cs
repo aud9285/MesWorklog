@@ -16,13 +16,9 @@
 
         public Line Line { get; set; } = default!;
 
-       
-        // 설비 없이 수작업하는 경우도 있어 null 허용
-        public int? EquipmentId { get; set; }
-
-        // EquipmentId가 null이면 이것도 null
-        public Equipment? Equipment { get; set; }
-
+        
+        // Equipment 제거 WorkLog로 이관
+        // (설비 고장 시 교체건을 고려)
 
         // 목표 수량
         public int TargetQty { get; set; }

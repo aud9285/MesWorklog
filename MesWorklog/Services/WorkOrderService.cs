@@ -8,6 +8,14 @@ using Microsoft.EntityFrameworkCore;
 namespace MesWorklog.Services
 {
     // C#에서 Service는 ASP.NET Core는 Program.cs에 직접 등록해야 함
+
+    // ToListAsync() — 여러 건 조회, 리스트로 (SELECT ... WHERE ...)
+    // FirstOrDefaultAsync() — 단건 조회, 없으면 null (SELECT ... LIMIT 1)
+    // AnyAsync(조건) — 존재 여부만 (true/false) (SELECT EXISTS...)
+    // CountAsync(조건) — 건수 (SELECT COUNT(*)  ...
+    // FindAsync(PK) - 캐시먼저 확인, PK 조회 (SELECT ... WHERE PK = ?)
+    // SumAsync(선택자) - 합계 계산(SELECT SUM()... WHERE ...)
+    // SaveChangesAsync() -  한 트랜잭션으로 INSERT/UPDATE/DELETE 실행. 중간에 실패시 Rollback (INSERT, UPDATE, DELETE...)
     public class WorkOrderService
     {
         // 보관할 필드 생성자에서만 대입가능, 이 후 변경불가
@@ -39,7 +47,6 @@ namespace MesWorklog.Services
                 .AsNoTracking()
                 .Include(o => o.Line)
                 .Include(o => o.Process)
-                .Include(o => o.Equipment)
                 .Include(o => o.WorkLogs)          // 누적 실적/인원 수를 세는 데 필요
                 // CompletedAt이 null = 목표 미달 = 아직 이어할 수 있음
                 .Where(o => o.CompletedAt == null && myProcessIds.Contains(o.ProcessId))
@@ -50,7 +57,6 @@ namespace MesWorklog.Services
                 o.Id,
                 o.LineId, o.Line.Name,
                 o.ProcessId, o.Process.Name,
-                o.EquipmentId, o.Equipment?.Name,
                 o.TargetQty,
                 // 누적실적 = 완료된 이력들의 수량 합
                 o.WorkLogs.Where(w => w.Status == WorkLogStatus.Completed).Sum(w => w.ActualQty),    

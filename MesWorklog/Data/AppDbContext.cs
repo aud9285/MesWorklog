@@ -100,9 +100,9 @@ namespace MesWorklog.Data
 
             // EquipmentId는 nullable(int?)이라(수작업 케이스 때문에 null 허용) EF Core 기본값은 "부모 삭제 시 null로 만들기" 인데,
             // 그러면 "이 작업을 어느 설비로 했는가"라는 과거 사실이 조용히 지워짐 → Restrict로 명시
-            modelBuilder.Entity<WorkOrder>()
-                .HasOne(o => o.Equipment).WithMany()
-                .HasForeignKey(o => o.EquipmentId)
+            modelBuilder.Entity<WorkLog>()
+                .HasOne(w => w.Equipment).WithMany()
+                .HasForeignKey(w => w.EquipmentId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             // 작업자삭제 시, 이 작업자가 진행한 작업이력가 있을경우 제한
@@ -196,7 +196,6 @@ namespace MesWorklog.Data
             modelBuilder.Entity<WorkOrder>().Property(o => o.Id).HasComment("작업지시 ID");
             modelBuilder.Entity<WorkOrder>().Property(o => o.ProcessId).HasComment("공정 ID");
             modelBuilder.Entity<WorkOrder>().Property(o => o.LineId).HasComment("실행 라인 ID");
-            modelBuilder.Entity<WorkOrder>().Property(o => o.EquipmentId).HasComment("설비 ID(수작업이면 NULL)");
             modelBuilder.Entity<WorkOrder>().Property(o => o.TargetQty).HasComment("목표 수량");
             modelBuilder.Entity<WorkOrder>().Property(o => o.CompletedAt).HasComment("완료 시각");
 
@@ -205,6 +204,7 @@ namespace MesWorklog.Data
             modelBuilder.Entity<WorkLog>().Property(w => w.Id).HasComment("작업이력 ID");
             modelBuilder.Entity<WorkLog>().Property(w => w.WorkOrderId).HasComment("작업지시 ID");
             modelBuilder.Entity<WorkLog>().Property(w => w.WorkerId).HasComment("작업자 ID");
+            modelBuilder.Entity<WorkLog>().Property(o => o.EquipmentId).HasComment("설비 ID(수작업이면 NULL)");
             modelBuilder.Entity<WorkLog>().Property(w => w.Status).HasComment("상태(InProgress=진행중, Paused=정지중, Completed=완료)");
             modelBuilder.Entity<WorkLog>().Property(w => w.StartTime).HasComment("작업 시작시각");
             modelBuilder.Entity<WorkLog>().Property(w => w.EndTime).HasComment("작업 종료시각");

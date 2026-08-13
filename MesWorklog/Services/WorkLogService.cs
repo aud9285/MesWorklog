@@ -8,6 +8,14 @@ using Microsoft.EntityFrameworkCore;
 namespace MesWorklog.Services
 {
     // C#에서 Service는 ASP.NET Core는 Program.cs에 직접 등록해야 함
+
+    // ToListAsync() — 여러 건 조회, 리스트로 (SELECT ... WHERE ...)
+    // FirstOrDefaultAsync() — 단건 조회, 없으면 null (SELECT ... LIMIT 1)
+    // AnyAsync(조건) — 존재 여부만 (true/false) (SELECT EXISTS...)
+    // CountAsync(조건) — 건수 (SELECT COUNT(*)  ...
+    // FindAsync(PK) - 캐시먼저 확인, PK 조회 (SELECT ... WHERE PK = ?)
+    // SumAsync(선택자) - 합계 계산(SELECT SUM()... WHERE ...)
+    // SaveChangesAsync() -  한 트랜잭션으로 INSERT/UPDATE/DELETE 실행. 중간에 실패시 Rollback (INSERT, UPDATE, DELETE...)
     public class WorkLogService
     {
         // 보관할 필드 생성자에서만 대입가능, 이 후 변경불가
@@ -80,7 +88,6 @@ namespace MesWorklog.Services
                 {
                     LineId = request.LineId.Value,
                     ProcessId = request.ProcessId.Value,
-                    EquipmentId = request.EquipmentId,
                     TargetQty = request.TargetQty.Value,
                 };
 
@@ -91,7 +98,7 @@ namespace MesWorklog.Services
             }
 
             // 상태 전이/시간 검증은 엔티티가 스스로 책임짐 (서비스는 조립만)
-            var log = WorkLog.Start(workOrderId, request.WorkerId, request.StartTime, now: KoreaTime.Now);
+            var log = WorkLog.Start(workOrderId, request.WorkerId, request.EquipmentId, request.StartTime, now: KoreaTime.Now);
 
             _db.WorkLogs.Add(log);
             await _db.SaveChangesAsync();
@@ -262,7 +269,6 @@ namespace MesWorklog.Services
                 .Include(w => w.Worker)
                 .Include(w => w.WorkOrder).ThenInclude(o => o.Line)
                 .Include(w => w.WorkOrder).ThenInclude(o => o.Process)
-                .Include(w => w.WorkOrder).ThenInclude(o => o.Equipment)
                 .Include(w => w.Pauses).ThenInclude(p => p.PauseReason)
                 .FirstOrDefaultAsync(w =>
                     w.WorkerId == workerId &&
@@ -284,7 +290,7 @@ namespace MesWorklog.Services
                 log.Worker.Name,
                 log.WorkOrder.Line.Name,
                 log.WorkOrder.Process.Name,
-                log.WorkOrder.Equipment?.Name,   // ?. 로 null 허용 — 설비 없는 수작업 케이스
+                log.Equipment?.Name,
                 log.WorkOrder.TargetQty,
                 completedQty,
                 log.Status.ToString(),

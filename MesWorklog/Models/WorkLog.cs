@@ -17,6 +17,10 @@ namespace MesWorklog.Models
         public int WorkerId { get; set; }
         public Worker Worker { get; set; } = default!;
 
+        // 필드 추가 (다른 필드들처럼 private set — Start()를 통해서만 채워짐)
+        public int? EquipmentId { get; private set; }
+        public Equipment? Equipment { get; private set; }
+
         // private로 설정하여 외부에서 값을 변경하지 못하도록 함
         // waiting 상태(최초의 상태(시작하기 전상태))
         public WorkLogStatus Status { get; private set; }
@@ -49,7 +53,7 @@ namespace MesWorklog.Models
 
         // 작업 시작
         // 미래시간 입력 방지
-        public static WorkLog Start(int workOrderId, int workerId, DateTime startTime, DateTime now)
+        public static WorkLog Start(int workOrderId, int workerId, int? equipmentId, DateTime startTime, DateTime now)
         {
             ValidateNotFuture(startTime, now, "시작 시각");
 
@@ -57,6 +61,7 @@ namespace MesWorklog.Models
             {
                 WorkOrderId = workOrderId,
                 WorkerId = workerId,
+                EquipmentId = equipmentId,
                 StartTime = startTime,
                 Status = WorkLogStatus.InProgress
             };

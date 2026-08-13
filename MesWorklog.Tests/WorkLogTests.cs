@@ -22,7 +22,7 @@ public class WorkLogTests
     public void 시작하면_진행중_상태가_된다()
     {
         //시작
-        var log = WorkLog.Start(workOrderId: 1, workerId: 1, startTime: At(9), now: Now);
+        var log = WorkLog.Start(workOrderId: 1, workerId: 1, equipmentId: null, startTime: At(9), now: Now);
 
         Assert.Equal(WorkLogStatus.InProgress, log.Status);
         Assert.Equal(At(9), log.StartTime);
@@ -36,7 +36,7 @@ public class WorkLogTests
         // AWS(UTC) 배포 시 오전 입력이 전부 미래로 판정되던 문제 때문에 KST로 단일화했고
         // 그 기준시각을 파라미터로 받으므로 여기서 now보다 뒤인 값을 넣어 검증한다
         Assert.Throws<InvalidTimeInputException>(
-            () => WorkLog.Start(1, 1, startTime: Now.AddMinutes(10), now: Now));
+            () => WorkLog.Start(1, 1, equipmentId: null, startTime: Now.AddMinutes(10), now: Now));
     }
 
     // ── Pause ────────────────────────────────────────────────
@@ -44,7 +44,7 @@ public class WorkLogTests
     [Fact]
     public void 정지하면_열린_정지_이력이_한_건_생긴다()
     {
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
 
         log.Pause(pausedAt: At(10), pauseReason: Reason(), now: Now);
 
@@ -58,7 +58,7 @@ public class WorkLogTests
     public void 연속으로_정지할_수_없다()
     {
         // 정지를 연달아 호출하면 열린 정지가 2건 이상 생겨 시간 계산이 무한정 커졌다
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
         log.Pause(At(10), Reason(), Now);
 
         Assert.Throws<InvalidWorkLogStateException>(() => log.Pause(At(11), Reason(), Now));
@@ -68,7 +68,7 @@ public class WorkLogTests
     public void 정지_시각은_직전_재개_시각보다_이후여야_한다()
     {
         // 정지 구간이 서로 겹치면 합산이 중복돼 가동률이 왜곡된다
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
         log.Pause(At(10), Reason(), Now);
         log.Resume(At(10, 30), Now);
 
@@ -81,7 +81,7 @@ public class WorkLogTests
     [Fact]
     public void 재개하면_열린_정지가_닫히고_진행중이_된다()
     {
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
         log.Pause(At(10), Reason(), Now);
 
         log.Resume(At(10, 30), Now);
@@ -94,7 +94,7 @@ public class WorkLogTests
     [Fact]
     public void 진행중일_때는_재개할_수_없다()
     {
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
 
         Assert.Throws<InvalidWorkLogStateException>(() => log.Resume(At(10), Now));
     }
@@ -107,7 +107,7 @@ public class WorkLogTests
         // PAUSED에서 완료하면 열린 정지가 남는데, 그 구간은 정지 합산에서는 제외되면서
         // ElapsedMinutes에는 포함돼 가동률이 100%로 부풀려졌다.
         // 가드를 IN_PROGRESS로 좁혔다
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
         log.Pause(At(10), Reason(), Now);
 
         Assert.Throws<InvalidWorkLogStateException>(() => log.Complete(At(12), 10, Now));
@@ -116,7 +116,7 @@ public class WorkLogTests
     [Fact]
     public void 종료_시각은_마지막_기록_시각보다_이후여야_한다()
     {
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
         log.Pause(At(10), Reason(), Now);
         log.Resume(At(11), Now);
 
@@ -127,7 +127,7 @@ public class WorkLogTests
     [Fact]
     public void 정지가_없으면_세_시간이_모두_같다()
     {
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
 
         log.Complete(endTime: At(12), actualQty: 10, now: Now);
 
@@ -143,7 +143,7 @@ public class WorkLogTests
     public void 계획정지와_비가동이_각각_차감된다()
     {
         // 09:00 시작 → 10:00~10:30 식사(계획정지 30분) → 11:00~11:20 고장(비가동 20분) → 12:00 완료
-        var log = WorkLog.Start(1, 1, At(9), Now);
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
 
         // Pause() 호출 시점에 바로 카테고리를 넘김 — 예전 SetCategory 후처리가 더 이상 필요 없음
         log.Pause(At(10), Reason(PauseCategory.Planned), Now);     // 식사

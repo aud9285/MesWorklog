@@ -8,6 +8,14 @@ using Microsoft.EntityFrameworkCore;
 namespace MesWorklog.Services
 {
     // C#에서 Service는 ASP.NET Core는 Program.cs에 직접 등록해야 함
+    
+    // ToListAsync() — 여러 건 조회, 리스트로 (SELECT ... WHERE ...)
+    // FirstOrDefaultAsync() — 단건 조회, 없으면 null (SELECT ... LIMIT 1)
+    // AnyAsync(조건) — 존재 여부만 (true/false) (SELECT EXISTS...)
+    // CountAsync(조건) — 건수 (SELECT COUNT(*)  ...
+    // FindAsync(PK) - 캐시먼저 확인, PK 조회 (SELECT ... WHERE PK = ?)
+    // SumAsync(선택자) - 합계 계산(SELECT SUM()... WHERE ...)
+    // SaveChangesAsync() -  한 트랜잭션으로 INSERT/UPDATE/DELETE 실행. 중간에 실패시 Rollback (INSERT, UPDATE, DELETE...)
     public class PauseReasonService
     {
         // 보관할 필드 생성자에서만 대입가능, 이 후 변경불가
