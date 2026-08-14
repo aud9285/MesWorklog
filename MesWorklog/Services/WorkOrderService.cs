@@ -78,69 +78,8 @@ namespace MesWorklog.Services
             .ToList();
         }
 
-        // 작업지시 수정 — 라인/공정 오선택 정정, 목표수량 조정
-        // 목표수량을 실적 이하로 낮추면 그 자리에서 완료 처리
-        // (설비 고장으로 남은 수량을 새 작업지시로 이어갈 때, 기존 건은 여기서 마감하는 흐름)
-        public async Task<WorkOrderResponse> UpdateAsync(int id, UpdateWorkOrderRequest request)
-        {
-            var workOrder = await _db.WorkOrders
-                .Include(o => o.Line)
-                .Include(o => o.Process)
-                .FirstOrDefaultAsync(o => o.Id == id)
-                ?? throw new KeyNotFoundException($"작업지시({id})를 찾을 수 없습니다.");
-
-            // 완료된 작업지시는 잠금 — 고치려면 이력을 삭제하고 다시 작성해야 함
-            if (workOrder.CompletedAt != null)
-                throw new BusinessRuleException("이미 완료된 작업지시는 수정할 수 없습니다.");
-
-            // 라인-공정 조합 검증 — StartAsync 신규 생성 때와 동일한 규칙
-            var isValidCombo = await _db.LineProcesses
-                .AnyAsync(lp => lp.LineId == request.LineId && lp.ProcessId == request.ProcessId);
-            if (!isValidCombo)
-                throw new BusinessRuleException("해당 라인에서 이 공정은 진행할 수 없는 조합입니다.");
-
-            // 누적 실적 — 자동완료 판정 기준
-            var completedQty = await _db.WorkLogs
-                .Where(w => w.WorkOrderId == id && w.Status == WorkLogStatus.Completed)
-                .SumAsync(w => w.ActualQty);
-
-            // 목표수량을 실적 이하로 낮추는 요청인지
-            var willAutoComplete = request.TargetQty <= completedQty;
-
-            if (willAutoComplete)
-            {
-                // 아직 진행중/정지중인 이력이 남아있으면 자동완료 금지
-                // (고장 → 재개 → 마감 을 먼저 끝낸 뒤에 수량을 정정하라는 순서 강제)
-                var hasActiveSession = await _db.WorkLogs.AnyAsync(w =>
-                    w.WorkOrderId == id &&
-                    (w.Status == WorkLogStatus.InProgress || w.Status == WorkLogStatus.Paused));
-
-                if (hasActiveSession)
-                    throw new BusinessRuleException(
-                        "진행 중이거나 정지 중인 작업이 있어 완료 처리할 수 없습니다. 먼저 재개 후 종료해주세요.");
-            }
-
-            workOrder.LineId = request.LineId;
-            workOrder.ProcessId = request.ProcessId;
-            workOrder.TargetQty = request.TargetQty;
-
-            if (willAutoComplete)
-                workOrder.CompletedAt = KoreaTime.Now;
-
-            await _db.SaveChangesAsync();
-
-            // Line/Process를 새 값으로 바꿨으므로, 응답용 이름은 다시 조회해서 내려줌
-            var line = await _db.Lines.FirstAsync(l => l.Id == workOrder.LineId);
-            var process = await _db.Processes.FirstAsync(p => p.Id == workOrder.ProcessId);
-
-            return new WorkOrderResponse(
-                workOrder.Id,
-                workOrder.LineId, line.Name,
-                workOrder.ProcessId, process.Name,
-                workOrder.TargetQty,
-                completedQty,
-                workOrder.CompletedAt);
-        }
+       
+        
 
     }
 

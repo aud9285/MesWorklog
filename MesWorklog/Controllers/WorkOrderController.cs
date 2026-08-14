@@ -21,12 +21,6 @@ namespace MesWorklog.Controllers
         public async Task<ActionResult<List<OpenWorkOrderResponse>>> GetOpen([FromQuery] int workerId)
             => Ok(await _workOrderService.GetOpenByWorkerAsync(workerId));
 
-        // 작업지시 수정
-        // PUT /api/work-orders/1
-        [HttpPut("{id}")]
-        public async Task<ActionResult<WorkOrderResponse>> Update(int id, [FromBody] UpdateWorkOrderRequest request)
-            => Ok(await _workOrderService.UpdateAsync(id, request));
-
 
     }
 }
