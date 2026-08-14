@@ -37,10 +37,10 @@ namespace MesWorklog.Models
         // 조업시간 = 종료시간 - 시작시간 작업완료시 계산
         public int? ElapsedMinutes { get; private set; }
 
-        // 가동시간 = 조업시간 - 계획정지시간
+        // 부하시간 = 조업시간 - 계획정지시간
         public int? OperatingMinutes { get; private set; }
 
-        // 실가동시간 = 가동시간 - 비가동시간
+        // 가동시간 = 부하시간 - 비가동시간
         public int? NetOperatingMinutes { get; private set; }
 
         // 작업 정지이력 리스트 
@@ -132,7 +132,7 @@ namespace MesWorklog.Models
                 .Max();
 
             if (endTime <= lastRecordedAt)
-                throw new InvalidTimeInputException("종료 시각은 마지막 기록 시각보다 이후여야 합니다.");
+                throw new InvalidTimeInputException("종료 시각은 마지막 시작/재개 시각보다 이후여야 합니다.");
 
             EndTime = endTime;
             ActualQty = actualQty;
@@ -143,12 +143,12 @@ namespace MesWorklog.Models
             // TotalMinutes = 시간 계산을 분으로 가져옴
             ElapsedMinutes = (int)(endTime - StartTime).TotalMinutes;
 
-            // 계획정지 구간 합(분) — 가동시간 계산에서 차감분
+            // 계획정지 구간 합(분) — 부하시간 계산에서 차감분
             var plannedPauseMinutes = Pauses
                 .Where(p => p.PauseReason.Category == PauseCategory.Planned && p.ResumedAt.HasValue)
                 .Sum(p => (int)(p.ResumedAt!.Value - p.PausedAt).TotalMinutes);
 
-            // 비가동 구간 합(분) — 실가동시간 계산에서 차감분
+            // 비가동 구간 합(분) — 가동시간 계산에서 차감분
             var unplannedPauseMinutes = Pauses
                 .Where(p => p.PauseReason.Category == PauseCategory.Unplanned && p.ResumedAt.HasValue)
                 .Sum(p => (int)(p.ResumedAt!.Value - p.PausedAt).TotalMinutes);

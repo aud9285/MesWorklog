@@ -83,5 +83,18 @@ namespace MesWorklog.Controllers
         [HttpDelete("{id:int}")]
         public async Task<ActionResult<DeleteResult>> Delete(int id)
             => Ok(await _workLogService.DeleteAsync(id));
+
+        // 작업지시 목록 - 기간별조회
+        // GET /api/work-logs?startDate=2026-08-01&endDate=2026-08-09
+        [HttpGet]
+        public async Task<ActionResult<List<WorkLogListItemResponse>>> GetByDateRange(
+            [FromQuery] DateOnly startDate, [FromQuery] DateOnly endDate)
+            => Ok(await _workLogService.GetByDateRangeAsync(startDate, endDate));
+
+        // 한 작업지시 작업이력 모아보기
+        // GET /api/work-logs/by-order/{workOrderId}
+        [HttpGet("by-order/{workOrderId:int}")]
+        public async Task<ActionResult<List<WorkLogDetailResponse>>> GetByWorkOrder(int workOrderId)
+            => Ok(await _workLogService.GetByWorkOrderIdAsync(workOrderId));
     }
 }

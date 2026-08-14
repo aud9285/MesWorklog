@@ -13,8 +13,13 @@ namespace MesWorklog.Dtos
         int ProcessId,
         string ProcessName,
         int TargetQty,
-        int CompletedQty,          // 완료된 이력들의 실적 합
-        int ActiveWorkerCount);    // 지금 진행중/정지중인 인원 수 (0이어도 이어받기 가능)
+        int CompletedQty,           // 완료된 이력들의 실적 합
+        int ActiveWorkerCount,      // 지금 진행중/정지중인 인원 수 (0이어도 이어받기 가능)
+        DateTime LastStartTime,     // 가장 최근 세션의 시작 시각
+        DateTime? LastEndTime,      // 진행중이면 null
+        string LastWorkerName);     
+
+
 
 
     // 작업지시 수정 — 라인/공정 오선택 정정, 목표수량 조정용

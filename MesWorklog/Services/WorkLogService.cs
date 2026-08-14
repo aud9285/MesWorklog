@@ -17,15 +17,21 @@ namespace MesWorklog.Services
     // SumAsync(선택자) - 합계 계산(SELECT SUM()... WHERE ...)
     // SaveChangesAsync() -  한 트랜잭션으로 INSERT/UPDATE/DELETE 실행. 중간에 실패시 Rollback (INSERT, UPDATE, DELETE...)
     public class WorkLogService
+
+
+
     {
+        // log
+        private readonly ILogger<WorkLogService> _logger;   // <T> 자리에 자기 클래스 이름
         // 보관할 필드 생성자에서만 대입가능, 이 후 변경불가
         private readonly AppDbContext _db;
 
         // 생성자
         // 요청이오면 DI컨테이너가 만들어서 보관
-        public WorkLogService(AppDbContext db)
+        public WorkLogService(AppDbContext db, ILogger<WorkLogService> logger)
         {
             _db = db;
+            _logger = logger;
         }
 
         // 작업 시작 — 이어하기(기존 작업지시) 또는 신규 작업지시 생성 두 경로를 하나로 처리
@@ -48,6 +54,7 @@ namespace MesWorklog.Services
             // 작업자 시간 겹침 방지
             // 완료된 이력에서 겹치는 시간이 있는지 체크
             // 작업시작시간 >= 완료된건의 시작시간 + 작업시작시간 <= 완료된건의 종료시간일때 에러처리
+
             var conflicting = await _db.WorkLogs
               .Where(w => w.WorkerId == request.WorkerId
                        && w.Status == WorkLogStatus.Completed
@@ -55,23 +62,32 @@ namespace MesWorklog.Services
                        && request.StartTime < w.EndTime)
               .FirstOrDefaultAsync();
 
+
             if (conflicting != null)
+            {
+                _logger.LogInformation("-------------------작업시작시 시간 확인 시작시간: {StartTime}, 기존 시작시간:{conflictingStart} 기존 완료시간{conflictingEnd}"
+                    , request.StartTime, conflicting?.StartTime, conflicting.EndTime);
                 throw new BusinessRuleException(
                     $"{conflicting.StartTime:yyyy-MM-dd HH:mm}~{conflicting.EndTime:HH:mm}에 이미 종료된 작업이 있습니다.");
+
+            }
 
             int workOrderId;
 
             if (request.WorkOrderId.HasValue)
             {
+
                 // 이어하기 — 그 작업지시가 실제로 존재하는지만 확인
                 var exists = await _db.WorkOrders.AnyAsync(o => o.Id == request.WorkOrderId.Value);
                 if (!exists)
                     throw new KeyNotFoundException($"작업지시({request.WorkOrderId})를 찾을 수 없습니다.");
+                _logger.LogInformation("작업지시 이어하기 확인{request.WorkOrderId}", request.WorkOrderId);
 
                 workOrderId = request.WorkOrderId.Value;
             }
             else
             {
+
                 // 신규 생성 — 라인/공정/목표수량은 필수
                 if (request.LineId is null || request.ProcessId is null || request.TargetQty is null)
                     throw new BusinessRuleException("신규 작업지시 생성에는 라인, 공정, 목표수량이 필요합니다.");
@@ -90,12 +106,14 @@ namespace MesWorklog.Services
                     ProcessId = request.ProcessId.Value,
                     TargetQty = request.TargetQty.Value,
                 };
-
+                // 
+                _logger.LogInformation("작업지시 신규생성 확인 {LineId}, {ProcessId}, {TargetQty}", request.LineId, request.ProcessId, request.TargetQty);
                 _db.WorkOrders.Add(workOrder);
                 await _db.SaveChangesAsync();   // WorkLog.Start가 int workOrderId를 요구해서, Id를 먼저 확정해야 함
 
                 workOrderId = workOrder.Id;
             }
+            
 
             // 상태 전이/시간 검증은 엔티티가 스스로 책임짐 (서비스는 조립만)
             var log = WorkLog.Start(workOrderId, request.WorkerId, request.EquipmentId, request.StartTime, now: KoreaTime.Now);
@@ -123,6 +141,8 @@ namespace MesWorklog.Services
             // 도메인 로직 호출 — 상태 전이/시간 검증은 엔티티가 책임짐
             workLog.Pause(request.PausedAt, pauseReason, KoreaTime.Now);
 
+            _logger.LogInformation("작업 정지 확인{PausedAt} {pauseReason}", request.PausedAt, pauseReason.Name);
+
             await _db.SaveChangesAsync();
 
             return ToResponse(workLog);
@@ -142,11 +162,13 @@ namespace MesWorklog.Services
 
             await _db.SaveChangesAsync();
 
+            _logger.LogInformation("작업재개 확인{ResumeAt}", request.ResumedAt);
+
             return ToResponse(workLog);
         }
 
 
-        // 작업 완료 — 진행중 상태의 작업이력만 가능. 조업/가동/실가동 시간이 여기서 확정 계산됨
+        // 작업 완료 — 진행중 상태의 작업이력만 가능. 조업/부하/가동 시간이 여기서 확정 계산됨
         public async Task<WorkLogResponse> CompleteAsync(int id, CompleteWorkLogRequest request)
         {
             // Pauses + PauseReason까지 로딩 — Complete()가 p.PauseReason.Category를 읽어서
@@ -181,9 +203,17 @@ namespace MesWorklog.Services
                          && w.StartTime < request.EndTime)     
                 .FirstOrDefaultAsync();
 
+
+
             if (overlapping != null)
+            {
+                _logger.LogInformation("----------------------------작업완료시 시간계산 확인 종료시간{EndTime} 기존 시작시간{overlappingStart} 기존 완료시간 {overlappingEnd}"
+                    , request.EndTime, overlapping.EndTime, overlapping.StartTime);
+
                 throw new BusinessRuleException(
                     $"{overlapping.StartTime:yyyy-MM-dd HH:mm}~{overlapping.EndTime:HH:mm}에 이미 종료된 작업과 시간이 겹칩니다.");
+
+            }
 
             workLog.Complete(request.EndTime, request.ActualQty, KoreaTime.Now);
 
@@ -199,6 +229,8 @@ namespace MesWorklog.Services
             if (otherCompletedQty + request.ActualQty >= workLog.WorkOrder.TargetQty)
                 workLog.WorkOrder.CompletedAt ??= KoreaTime.Now;
 
+
+            _logger.LogInformation("작업 완료 확인 기존건{other}, 완료건{Actual}, 목표{Target}", otherCompletedQty, workLog.ActualQty, workLog.WorkOrder.TargetQty);
 
             await _db.SaveChangesAsync();
 
@@ -223,6 +255,9 @@ namespace MesWorklog.Services
 
             // WorkLogPause 행들은 DB Cascade로 함께 사라진다
             _db.WorkLogs.Remove(workLog);
+
+            _logger.LogInformation("작업 삭제 시 이력확인 {siblingCount}", siblingCount);
+
 
             if (siblingCount == 0)
             {
@@ -269,6 +304,7 @@ namespace MesWorklog.Services
                 .Include(w => w.Worker)
                 .Include(w => w.WorkOrder).ThenInclude(o => o.Line)
                 .Include(w => w.WorkOrder).ThenInclude(o => o.Process)
+                .Include(w => w.Equipment)
                 .Include(w => w.Pauses).ThenInclude(p => p.PauseReason)
                 .FirstOrDefaultAsync(w =>
                     w.WorkerId == workerId &&
@@ -304,6 +340,56 @@ namespace MesWorklog.Services
                         p.PausedAt,
                         p.ResumedAt))
                     .ToList());
+        }
+
+        // 상세조회 목록 — 완료/진행중/정지중 전부 포함
+        public async Task<List<WorkLogListItemResponse>> GetByDateRangeAsync(DateOnly startDate, DateOnly endDate)
+        {
+            var start = startDate.ToDateTime(TimeOnly.MinValue);
+            var end = endDate.ToDateTime(TimeOnly.MinValue).AddDays(1);   // endDate 하루 전체를 포함
+
+            return await _db.WorkLogs
+                .Where(w => w.StartTime >= start && w.StartTime < end)
+                .OrderByDescending(w => w.StartTime)
+                .Select(w => new WorkLogListItemResponse(
+                    w.Id, w.WorkOrderId, w.WorkerId, w.Worker.Name,
+                    w.WorkOrder.Line.Name, w.WorkOrder.Process.Name,
+                    w.Equipment != null ? w.Equipment.Name : null,
+                    w.Status.ToString(),
+                    w.StartTime, w.EndTime,
+                    w.Status == WorkLogStatus.Completed ? w.ActualQty : (int?)null,
+                    w.ElapsedMinutes, w.OperatingMinutes, w.NetOperatingMinutes))
+                .ToListAsync();
+        }
+
+        // 상세조회 목록에서 선택시 이력상세
+        public async Task<List<WorkLogDetailResponse>> GetByWorkOrderIdAsync(int workOrderId)
+        {
+            var logs = await _db.WorkLogs
+                .Where(w => w.WorkOrderId == workOrderId)
+                .Include(w => w.Worker)
+                .Include(w => w.WorkOrder).ThenInclude(o => o.Line)
+                .Include(w => w.WorkOrder).ThenInclude(o => o.Process)
+                .Include(w => w.Equipment)
+                .Include(w => w.Pauses).ThenInclude(p => p.PauseReason)
+                .OrderBy(w => w.StartTime)   // 진행된 순서대로
+                .ToListAsync();
+
+            return logs.Select(log => new WorkLogDetailResponse(
+                log.Id, log.WorkOrderId,
+                log.WorkOrder.LineId, log.WorkOrder.Line.Name,
+                log.WorkOrder.ProcessId, log.WorkOrder.Process.Name,
+                log.Equipment?.Name,
+                log.WorkerId, log.Worker.Name,
+                log.Status.ToString(),
+                log.StartTime, log.EndTime,
+                log.Status == WorkLogStatus.Completed ? log.ActualQty : (int?)null,
+                log.ElapsedMinutes, log.OperatingMinutes, log.NetOperatingMinutes,
+                log.WorkOrder.TargetQty,
+                log.Pauses.OrderBy(p => p.PausedAt).Select(p => new WorkLogPauseResponse(
+                    p.Id, p.PauseReason.Name, p.PauseReason.Category.ToString(),
+                    p.PausedAt, p.ResumedAt)).ToList()))
+                .ToList();
         }
 
 

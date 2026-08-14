@@ -46,7 +46,7 @@ namespace MesWorklog.Dtos
         public DateTime EndTime { get; set; }
 
         // 음수 방지 — WorkLog.Complete() 자체엔 이 검증이 없어서 여기서 반드시 막아야 함
-        [Range(0, int.MaxValue, ErrorMessage = "실적 수량은 0 이상이어야 합니다.")]
+        [Range(1, int.MaxValue, ErrorMessage = "실적 수량은 1 이상이어야 합니다.")]
         public int ActualQty { get; set; }
     }
 
@@ -86,5 +86,43 @@ namespace MesWorklog.Dtos
         string Category,           // "Planned" / "Unplanned"
         DateTime PausedAt,
         DateTime? ResumedAt);
+
+    // 상세조회 목록 카드 한줄
+    public record WorkLogListItemResponse(
+        int Id,
+        int WorkOrderId,
+        int WorkerId,
+        string WorkerName,
+        string LineName,
+        string ProcessName,
+        string? EquipmentName,
+        string Status,
+        DateTime StartTime,
+        DateTime? EndTime,
+        int? ActualQty,
+        int? ElapsedMinutes,
+        int? OperatingMinutes,
+        int? NetOperatingMinutes);
+
+    // 상세 화면에서 세션카드 하나
+    public record WorkLogDetailResponse(
+        int Id,
+        int WorkOrderId,
+        int LineId,
+        string LineName,
+        int ProcessId,
+        string ProcessName,
+        string? EquipmentName,
+        int WorkerId,
+        string WorkerName,
+        string Status,
+        DateTime StartTime,
+        DateTime? EndTime,
+        int? ActualQty,
+        int? ElapsedMinutes,
+        int? OperatingMinutes,
+        int? NetOperatingMinutes,
+        int TargetQty,
+        List<WorkLogPauseResponse> Pauses);
 }
 

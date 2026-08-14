@@ -47,23 +47,35 @@ namespace MesWorklog.Services
                 .AsNoTracking()
                 .Include(o => o.Line)
                 .Include(o => o.Process)
-                .Include(o => o.WorkLogs)          // 누적 실적/인원 수를 세는 데 필요
+                .Include(o => o.WorkLogs)
+                // 작업자명 추가
+                    .ThenInclude(w => w.Worker)
+                // 누적 실적/인원 수를 세는 데 필요
                 // CompletedAt이 null = 목표 미달 = 아직 이어할 수 있음
                 .Where(o => o.CompletedAt == null && myProcessIds.Contains(o.ProcessId))
                 .ToListAsync();
 
             // 집계는 메모리에서 — WorkLogs를 이미 Include로 가져왔으므로 추가 쿼리가 없다
-            return orders.Select(o => new OpenWorkOrderResponse(
-                o.Id,
-                o.LineId, o.Line.Name,
-                o.ProcessId, o.Process.Name,
-                o.TargetQty,
-                // 누적실적 = 완료된 이력들의 수량 합
-                o.WorkLogs.Where(w => w.Status == WorkLogStatus.Completed).Sum(w => w.ActualQty),    
-                // 진행중 인원 체크
-                o.WorkLogs.Count(w => w.Status == WorkLogStatus.InProgress
-                                   || w.Status == WorkLogStatus.Paused)))
-                .ToList();
+            return orders.Select(o =>
+            {
+                // 가장 최근에 시작된 세션 — WorkOrder는 항상 최초 WorkLog와 함께 생성되므로
+                // 이 목록에 뜨는 WorkOrder는 WorkLogs가 최소 1건은 있음이 보장됨\
+                // OrderByDescending LINQ 메서드야 내림차순 매서드
+                var latest = o.WorkLogs.OrderByDescending(w => w.StartTime).First();
+
+                return new OpenWorkOrderResponse(
+                    o.Id,
+                    o.LineId, o.Line.Name,
+                    o.ProcessId, o.Process.Name,
+                    o.TargetQty,
+                    o.WorkLogs.Where(w => w.Status == WorkLogStatus.Completed).Sum(w => w.ActualQty),
+                    o.WorkLogs.Count(w => w.Status == WorkLogStatus.InProgress
+                                       || w.Status == WorkLogStatus.Paused),
+                    latest.StartTime,
+                    latest.EndTime,
+                    latest.Worker.Name);
+            })
+            .ToList();
         }
 
         // 작업지시 수정 — 라인/공정 오선택 정정, 목표수량 조정

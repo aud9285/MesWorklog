@@ -210,8 +210,8 @@ namespace MesWorklog.Data
             modelBuilder.Entity<WorkLog>().Property(w => w.EndTime).HasComment("작업 종료시각");
             modelBuilder.Entity<WorkLog>().Property(w => w.ActualQty).HasComment("실적 수량");
             modelBuilder.Entity<WorkLog>().Property(w => w.ElapsedMinutes).HasComment("조업시간(분)");
-            modelBuilder.Entity<WorkLog>().Property(w => w.OperatingMinutes).HasComment("가동시간(분)");
-            modelBuilder.Entity<WorkLog>().Property(w => w.NetOperatingMinutes).HasComment("실가동시간(분)");
+            modelBuilder.Entity<WorkLog>().Property(w => w.OperatingMinutes).HasComment("부하시간(분)");
+            modelBuilder.Entity<WorkLog>().Property(w => w.NetOperatingMinutes).HasComment("가동시간(분)");
 
             // 정지이력
             modelBuilder.Entity<WorkLogPause>().ToTable(t => t.HasComment("작업 정지이력"));
