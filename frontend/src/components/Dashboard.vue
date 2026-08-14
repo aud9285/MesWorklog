@@ -6,7 +6,7 @@
  *
  * 【UI 구성】
  *  1) 필터 바 — 기간(일/주/월/연) · 기준 날짜 · 그룹(작업자/공정/라인/설비)
- *  2) 요약 지표 — 전체 가동률, 조업시간 합, 실가동시간 합, 집계 대상 수
+ *  2) 요약 지표 — 전체 가동률, 조업시간 합, 가동시간 합, 집계 대상 수
  *  3) 차트 — 그룹에 따라 막대 방향이 달라진다
  *       · 공정 / 라인   : 항목이 적어 세로 막대
  *       · 작업자 / 설비 : 항목이 많아 가로 막대 + 스크롤
@@ -19,7 +19,7 @@
  *
  * 【가동률 계산 방식】 (§3-4)
  *  그룹 내 개별 비율의 평균이 아니라, 분자/분모를 각각 합산한 뒤 나눈다.
- *  → 화면의 "전체 가동률"도 Σ실가동 / Σ조업 으로 계산해야 서버와 값이 맞는다.
+ *  → 화면의 "전체 가동률"도 Σ가동 / Σ부하시간(조업시간 아님, 계획정지 제외된 값)으로 계산해야 서버와 값이 맞는다.
  *
  * ────────────────────────────────────────────────────────────────
  * TODO(연동) — 이 화면이 사용할 API
@@ -27,7 +27,8 @@
  *       ※ 설계 §5 는 week 도 포함하지만 화면에서 폐기했다 (아래 periods 주석 참고).
  *         서버가 week 를 받아도 무방하나 호출하는 쪽이 없다.
  *
- *   응답: [{ groupId, groupName, totalElapsedMinutes, totalNetOperatingMinutes, availabilityPercent }]
+ *   응답: [{ groupId, groupName, totalElapsedMinutes, totalOperatingMinutes, totalNetOperatingMinutes, availabilityPercent }]
+ *       availabilityPercent = Σ가동 / Σ부하시간 × 100 (조업시간이 아니라 부하시간이 분모, §3-4)
  *
  *   period / date / groupBy 셋 중 하나라도 바뀌면 다시 조회하면 된다 →
  *     watch([period, baseDate, groupBy], fetchEfficiency, { immediate: true })
@@ -117,14 +118,17 @@ const orientation = computed(() =>
  *   지금은 groupBy 에 맞는 목 데이터를 골라 보여준다 */
 const rows = computed(() => mock.efficiency[groupBy.value] ?? []);
 
-/* 요약 지표 — 개별 비율의 평균이 아니라 합계끼리 나눈다 (§3-4) */
+/* 요약 지표 — 개별 비율의 평균이 아니라 합계끼리 나눈다 (§3-4)
+ * percent의 분모는 elapsed(조업)가 아니라 operating(가동) — 계획정지는 가동 대상이 아니었던
+ * 시간이라 분모에서 빠진다. elapsed는 "총 조업시간" 요약 지표를 보여주는 데만 쓴다 */
 const totals = computed(() => {
   const elapsed = rows.value.reduce((s, r) => s + r.totalElapsedMinutes, 0);
+  const operating = rows.value.reduce((s, r) => s + r.totalOperatingMinutes, 0);
   const net = rows.value.reduce((s, r) => s + r.totalNetOperatingMinutes, 0);
   return {
     elapsed,
     net,
-    percent: elapsed === 0 ? 0 : (net / elapsed) * 100,
+    percent: operating === 0 ? 0 : (net / operating) * 100,
     count: rows.value.length,
   };
 });
@@ -198,7 +202,7 @@ const groupLabel = computed(
         <div class="v">{{ duration(totals.elapsed) }}</div>
       </div>
       <div class="metric">
-        <div class="k">총 실가동시간</div>
+        <div class="k">총 가동시간</div>
         <div class="v">{{ duration(totals.net) }}</div>
       </div>
       <div class="metric">

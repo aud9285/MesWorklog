@@ -105,9 +105,9 @@ Process(공정) ──N:M──▶ Worker(작업자)    ※ 조인: WorkerProces
 Equipment(설비) — 어느 공정에도 종속되지 않는 독립 테이블
 
 WorkOrder(작업지시) ──N:1──▶ Process (필수)
-                   ──N:1──▶ Line (필수)
-                   ──N:1──▶ Equipment (nullable, 수작업 가능)
+                   ──N:1──▶ Line (필수)                   
                    ──1:N──▶ WorkLog(작업이력) ──N:1──▶ Worker
+                                              ──N:1──▶ Equipment (nullable, 수작업 가능)
                                               ──1:N──▶ WorkLogPause ──N:1──▶ PauseReason
 
 ```
@@ -134,10 +134,10 @@ LineProcess, WorkerProcess는 복합키로 관리
 조업시간   = EndTime - StartTime
 계획정지   = Σ(WorkLogPause 중 category=PLANNED)     // 식사, 정기점검 등
 비가동     = Σ(WorkLogPause 중 category=UNPLANNED)   // 고장, 자재대기 등
-가동시간   = 조업시간 - 계획정지
-실가동시간 = 가동시간 - 비가동
+부하시간   = 조업시간 - 계획정지
+가동시간 = 가동시간 - 비가동
 
-가동률(%) = Σ실가동시간 / Σ조업시간 × 100
+가동률(%) = Σ가동시간 / 부하시간 × 100
 ```
 
 
@@ -161,6 +161,8 @@ LineProcess, WorkerProcess는 복합키로 관리
 - **방치된 진행중 작업이 분모를 계속 키우던 문제**: 퇴근 시 종료를 잊은 건을 취소할 방법이 없었습니다. 작업자가 작업종료 되지않는 이력이 있을경우 Exception 발생기능 추가. 오입력으로 기록된 이력을 위해 `DELETE /api/work-logs/{id}` 추가
 - **설비를 특정 공정에 종속시킨 모델링 오류**: 같은 설비를 여러 공정이 공유하면 데이터가 모순되어 독립 엔티티로 변경했습니다.
 - **마스터데이터 삭제가 작업이력을 통째로 지울 뻔한 문제**: EF Core는 필수 FK의 삭제 전파가 기본 활성화라(cascade), 설정 없이 배포했다면 작업자 삭제 시 그 사람의 작업이력이 전부 사라질 뻔했습니다. 이력이 있으면 `is_active=false`로 비활성화·없으면 실제 삭제하는 정책으로 정리했습니다.
+- **설비를 작업지시에(WorkOrder) 고정 시킨것을 작업이력(WorkLog)으로 이관**: 설비가 고장이슈로 설비를 교체할 시 과거 이력이 왜곡되는 이슈발생 WorkOrder -> WorkLog로 설비 이관, 이제 설비 고장이슈로 설비 교체시 진행 flow는 설비고장으로 인한 중지 -> 재개 -> 완료 수량입력 -> 이어하기로 변경
+
 ### 알려진 한계
 
 같은 작업지시를 동시에 여러 명이 시작하려는 경우의 동시성(race condition) 문제는 아직 처리하지 않았습니다. 개선 방향으로는 낙관적 락(버전 컬럼) 또는 DB 유니크 제약을 고려하고 있습니다.
@@ -175,14 +177,14 @@ LineProcess, WorkerProcess는 복합키로 관리
 | ✅ | GET/POST/PUT/DELETE | `/api/processes?includeInactive=` | 공정 CRUD (소속 라인 N:M, lineIds 배열로 응답) |
 | ✅ | GET/POST/PUT/DELETE | `/api/workers?processId=&includeInactive=` | 작업자 CRUD (소속 공정 N:M, processIds 배열로 응답) |
 | ✅ | GET/POST/PUT/DELETE | `/api/equipments?includeInactive=` | 설비 CRUD |
-| ⬜ | GET | `/api/pause-reasons` | 정지사유 목록 |
-| ⬜ | GET | `/api/work-orders/open?processId=` | 이어하기용 미완료 작업지시 |
-| ⬜ | PATCH | `/api/work-orders/{id}` | 라인/공정/설비 오선택 정정 |
-| ⬜ | POST | `/api/work-logs/start` | `{workerId, startTime, workOrderId}` 또는 신규 생성 |
-| ⬜ | POST | `/api/work-logs/{id}/pause` | `{pausedAt, pauseReasonId}` |
-| ⬜ | POST | `/api/work-logs/{id}/resume` | `{resumedAt}` |
-| ⬜ | POST | `/api/work-logs/{id}/complete` | `{endTime, actualQty}` |
-| ⬜ | DELETE | `/api/work-logs/{id}` | 오입력 이력 삭제 |
+| ✅ | GET | `/api/pause-reasons` | 정지사유 목록 |
+| ✅ | GET | `/api/work-orders/open?processId=` | 이어하기용 미완료 작업지시 |
+| ✅ | PUT | `/api/work-orders/{id}` | 라인/공정/설비 오선택 정정, targetQty 오선택 포함(targetQty 수정시 actualQty가 수정한값에 도달하면 완료처리) |
+| ✅ | POST | `/api/work-logs/start` | `{workerId, startTime, workOrderId}` 또는 신규 생성 |
+| ✅ | POST | `/api/work-logs/{id}/pause` | `{pausedAt, pauseReasonId}` |
+| ✅ | POST | `/api/work-logs/{id}/resume` | `{resumedAt}` |
+| ✅ | POST | `/api/work-logs/{id}/complete` | `{endTime, actualQty}` |
+| ✅ | DELETE | `/api/work-logs/{id}` | 오입력 이력 삭제 |
 | ⬜ | GET | `/api/work-logs/{id}` | 상세 조회 |
 | ⬜ | GET | `/api/work-logs/efficiency?period=&date=&groupBy=` | 대시보드 가동률 |
 
@@ -213,7 +215,7 @@ MesWorklog/
   - 전역 예외 처리(`IExceptionHandler` → ProblemDetails): 완료
   - 라인 CRUD API: 완료 (Swagger 검증 완료 — 400/201/409/404 전부 확인)
   - 공정 / 작업자 / 설비 CRUD: 완료(프론트엔드 연동 후 테스트 완료)
-  - 작업이력(시작·정지·재개·완료) API: 예정
+  - 작업이력(시작·정지·재개·완료) API: 완료
   - Dapper 기반 대시보드 집계: 예정
 - 테스트: `WorkLog` 상태 전이·OEE 시간 분해 단위테스트 11건 (`dotnet test`)
 - 프론트엔드: 화면 4개 UI/UX 구현 완료(목 데이터 기준), 마스터데이터 화면 API 연동 완료, 나머지 3개 화면 연동 예정

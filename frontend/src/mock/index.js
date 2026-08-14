@@ -94,31 +94,31 @@ export const activeLogsByWorker = {
  * 진행중 건도 목록에 보여야 종료를 잊고 방치된 이력을 찾아 지울 수 있다(§8-3). */
 export const workLogsByDate = [
   {
-    id: 9000, workerId: 1, workerName: '김철수',
+    id: 9000, workOrderId: 100, workerId: 1, workerName: '김철수',
     lineName: '1라인', processName: '조립', equipmentName: '조립기 A',
     status: 'Completed', startTime: '2026-08-09T09:00:00', endTime: '2026-08-09T18:00:00',
     actualQty: 480, elapsedMinutes: 540, operatingMinutes: 480, netOperatingMinutes: 425,
   },
   {
-    id: 9003, workerId: 3, workerName: '박민수',
+    id: 9003, workOrderId: 103, workerId: 3, workerName: '박민수',
     lineName: '1라인', processName: '검사', equipmentName: '검사기 B',
     status: 'Completed', startTime: '2026-08-09T09:00:00', endTime: '2026-08-09T17:30:00',
     actualQty: 290, elapsedMinutes: 510, operatingMinutes: 450, netOperatingMinutes: 396,
   },
   {
-    id: 9004, workerId: 4, workerName: '정다은',
+    id: 9004, workOrderId: 104, workerId: 4, workerName: '정다은',
     lineName: '2라인', processName: '포장', equipmentName: null,
     status: 'Completed', startTime: '2026-08-09T08:30:00', endTime: '2026-08-09T16:00:00',
     actualQty: 195, elapsedMinutes: 450, operatingMinutes: 390, netOperatingMinutes: 250,
   },
   {
-    id: 9002, workerId: 2, workerName: '이영희',
+    id: 9002, workOrderId: 102, workerId: 2, workerName: '이영희',
     lineName: '1라인', processName: '검사', equipmentName: '검사기 B',
     status: 'InProgress', startTime: '2026-08-09T10:00:00', endTime: null,
     actualQty: 0, elapsedMinutes: null, operatingMinutes: null, netOperatingMinutes: null,
   },
   {
-    id: 9001, workerId: 1, workerName: '김철수',
+    id: 9001, workOrderId: 101, workerId: 1, workerName: '김철수',
     lineName: '1라인', processName: '조립', equipmentName: '조립기 A',
     status: 'Paused', startTime: '2026-08-09T09:00:00', endTime: null,
     actualQty: 0, elapsedMinutes: null, operatingMinutes: null, netOperatingMinutes: null,
@@ -127,7 +127,7 @@ export const workLogsByDate = [
    * 위 9001(김철수, 진행중)과 workOrderId 가 같아서 서로 "형제 이력"이 된다.
    * 이 상태에서 한쪽 카드의 작업지시를 수정하면 다른 쪽 표시도 함께 바뀐다(§4-4) */
   {
-    id: 9005, workerId: 2, workerName: '이영희',
+    id: 9005, workOrderId: 101, workerId: 2, workerName: '이영희',
     lineName: '1라인', processName: '조립', equipmentName: '조립기 A',
     status: 'Completed', startTime: '2026-08-09T07:00:00', endTime: '2026-08-09T12:00:00',
     actualQty: 320, elapsedMinutes: 300, operatingMinutes: 270, netOperatingMinutes: 246,
@@ -139,7 +139,7 @@ export const workLogsByDate = [
  *   여기서는 id 를 키로 하는 맵으로 흉내낸다. */
 export const workLogDetails = {
   9000: {
-    workOrderId: 100, lineId: 1, processId: 1, equipmentId: 1,
+    workOrderId: 100, lineId: 1, processId: 1, targetQty: 500,
     pauses: [
       { id: 11, reasonName: '식사', category: 'Planned', pausedAt: '2026-08-09T12:00:00', resumedAt: '2026-08-09T13:00:00' },
       { id: 12, reasonName: '설비 고장', category: 'Unplanned', pausedAt: '2026-08-09T14:10:00', resumedAt: '2026-08-09T14:45:00' },
@@ -147,35 +147,36 @@ export const workLogDetails = {
     ],
   },
   9003: {
-    workOrderId: 103, lineId: 1, processId: 2, equipmentId: 2,
+    workOrderId: 103, lineId: 1, processId: 2, targetQty: 300,
     pauses: [
       { id: 21, reasonName: '식사', category: 'Planned', pausedAt: '2026-08-09T12:00:00', resumedAt: '2026-08-09T13:00:00' },
       { id: 22, reasonName: '품질 이상', category: 'Unplanned', pausedAt: '2026-08-09T15:00:00', resumedAt: '2026-08-09T15:54:00' },
     ],
   },
   9004: {
-    workOrderId: 104, lineId: 2, processId: 3, equipmentId: null,
+    workOrderId: 104, lineId: 2, processId: 3, targetQty: 200,
     pauses: [
       { id: 31, reasonName: '식사', category: 'Planned', pausedAt: '2026-08-09T12:00:00', resumedAt: '2026-08-09T13:00:00' },
       { id: 32, reasonName: '설비 고장', category: 'Unplanned', pausedAt: '2026-08-09T13:30:00', resumedAt: '2026-08-09T15:50:00' },
     ],
   },
   9002: {
-    workOrderId: 102, lineId: 1, processId: 2, equipmentId: 2,
+    workOrderId: 102, lineId: 1, processId: 2, targetQty: 400,
     pauses: [
       { id: 41, reasonName: '자재 대기', category: 'Unplanned', pausedAt: '2026-08-09T13:00:00', resumedAt: '2026-08-09T13:25:00' },
     ],
   },
   9001: {
-    workOrderId: 101, lineId: 1, processId: 1, equipmentId: 1,
+    workOrderId: 101, lineId: 1, processId: 1, targetQty: 600,
     pauses: [
       { id: 51, reasonName: '식사', category: 'Planned', pausedAt: '2026-08-09T12:00:00', resumedAt: '2026-08-09T13:00:00' },
       { id: 52, reasonName: '설비 고장', category: 'Unplanned', pausedAt: '2026-08-09T15:20:00', resumedAt: null },
     ],
   },
-  // 9001 과 같은 작업지시(#101) — 이어하기로 나눠 수행한 형제 이력
+  // 9001 과 같은 작업지시(#101) — 이어하기로 나눠 수행한 형제 이력. targetQty 는 작업지시
+  // 소유값이라 형제끼리 항상 같다(§4-4) — 이 mock 도 그 불변식을 그대로 반영한다
   9005: {
-    workOrderId: 101, lineId: 1, processId: 1, equipmentId: 1,
+    workOrderId: 101, lineId: 1, processId: 1, targetQty: 600,
     pauses: [
       { id: 61, reasonName: '자재 대기', category: 'Unplanned', pausedAt: '2026-08-09T09:30:00', resumedAt: '2026-08-09T09:54:00' },
       { id: 62, reasonName: '정기점검', category: 'Planned', pausedAt: '2026-08-09T10:30:00', resumedAt: '2026-08-09T11:00:00' },
@@ -184,31 +185,32 @@ export const workLogDetails = {
 };
 
 
-/* 대시보드 가동률 — groupBy 별로 다른 목록 */
+/* 대시보드 가동률 — groupBy 별로 다른 목록.
+ * availabilityPercent = totalNetOperatingMinutes / totalOperatingMinutes × 100 (§3-4, 분모는 조업시간이 아니라 부하시간) */
 export const efficiency = {
   worker: [
-    { groupId: 1, groupName: '김철수', totalElapsedMinutes: 2400, totalNetOperatingMinutes: 2064, availabilityPercent: 86.0 },
-    { groupId: 2, groupName: '이영희', totalElapsedMinutes: 2280, totalNetOperatingMinutes: 2120, availabilityPercent: 93.0 },
-    { groupId: 3, groupName: '박민수', totalElapsedMinutes: 1980, totalNetOperatingMinutes: 1465, availabilityPercent: 74.0 },
-    { groupId: 4, groupName: '정다은', totalElapsedMinutes: 2160, totalNetOperatingMinutes: 1382, availabilityPercent: 64.0 },
-    { groupId: 5, groupName: '최former', totalElapsedMinutes: 900, totalNetOperatingMinutes: 801, availabilityPercent: 89.0 },
-    { groupId: 6, groupName: '한지우', totalElapsedMinutes: 1740, totalNetOperatingMinutes: 1409, availabilityPercent: 81.0 },
-    { groupId: 7, groupName: '오세훈', totalElapsedMinutes: 1620, totalNetOperatingMinutes: 1069, availabilityPercent: 66.0 },
-    { groupId: 8, groupName: '유가람', totalElapsedMinutes: 2040, totalNetOperatingMinutes: 1795, availabilityPercent: 88.0 },
+    { groupId: 1, groupName: '김철수', totalElapsedMinutes: 2400, totalOperatingMinutes: 2280, totalNetOperatingMinutes: 2064, availabilityPercent: 90.5 },
+    { groupId: 2, groupName: '이영희', totalElapsedMinutes: 2280, totalOperatingMinutes: 2160, totalNetOperatingMinutes: 2120, availabilityPercent: 98.1 },
+    { groupId: 3, groupName: '박민수', totalElapsedMinutes: 1980, totalOperatingMinutes: 1800, totalNetOperatingMinutes: 1465, availabilityPercent: 81.4 },
+    { groupId: 4, groupName: '정다은', totalElapsedMinutes: 2160, totalOperatingMinutes: 1900, totalNetOperatingMinutes: 1382, availabilityPercent: 72.7 },
+    { groupId: 5, groupName: '최former', totalElapsedMinutes: 900, totalOperatingMinutes: 850, totalNetOperatingMinutes: 801, availabilityPercent: 94.2 },
+    { groupId: 6, groupName: '한지우', totalElapsedMinutes: 1740, totalOperatingMinutes: 1620, totalNetOperatingMinutes: 1409, availabilityPercent: 87.0 },
+    { groupId: 7, groupName: '오세훈', totalElapsedMinutes: 1620, totalOperatingMinutes: 1450, totalNetOperatingMinutes: 1069, availabilityPercent: 73.7 },
+    { groupId: 8, groupName: '유가람', totalElapsedMinutes: 2040, totalOperatingMinutes: 1950, totalNetOperatingMinutes: 1795, availabilityPercent: 92.1 },
   ],
   process: [
-    { groupId: 1, groupName: '조립', totalElapsedMinutes: 6120, totalNetOperatingMinutes: 5202, availabilityPercent: 85.0 },
-    { groupId: 2, groupName: '검사', totalElapsedMinutes: 4380, totalNetOperatingMinutes: 3197, availabilityPercent: 73.0 },
-    { groupId: 3, groupName: '포장', totalElapsedMinutes: 3960, totalNetOperatingMinutes: 3524, availabilityPercent: 89.0 },
+    { groupId: 1, groupName: '조립', totalElapsedMinutes: 6120, totalOperatingMinutes: 5800, totalNetOperatingMinutes: 5202, availabilityPercent: 89.7 },
+    { groupId: 2, groupName: '검사', totalElapsedMinutes: 4380, totalOperatingMinutes: 4000, totalNetOperatingMinutes: 3197, availabilityPercent: 79.9 },
+    { groupId: 3, groupName: '포장', totalElapsedMinutes: 3960, totalOperatingMinutes: 3800, totalNetOperatingMinutes: 3524, availabilityPercent: 92.7 },
   ],
   line: [
-    { groupId: 1, groupName: '1라인', totalElapsedMinutes: 8400, totalNetOperatingMinutes: 6972, availabilityPercent: 83.0 },
-    { groupId: 2, groupName: '2라인', totalElapsedMinutes: 6060, totalNetOperatingMinutes: 5211, availabilityPercent: 86.0 },
+    { groupId: 1, groupName: '1라인', totalElapsedMinutes: 8400, totalOperatingMinutes: 7800, totalNetOperatingMinutes: 6972, availabilityPercent: 89.4 },
+    { groupId: 2, groupName: '2라인', totalElapsedMinutes: 6060, totalOperatingMinutes: 5700, totalNetOperatingMinutes: 5211, availabilityPercent: 91.4 },
   ],
   equipment: [
-    { groupId: 1, groupName: '조립기 A', totalElapsedMinutes: 6120, totalNetOperatingMinutes: 5140, availabilityPercent: 84.0 },
-    { groupId: 2, groupName: '검사기 B', totalElapsedMinutes: 4380, totalNetOperatingMinutes: 3021, availabilityPercent: 69.0 },
-    { groupId: 3, groupName: '포장기 C', totalElapsedMinutes: 3960, totalNetOperatingMinutes: 3603, availabilityPercent: 91.0 },
-    { groupId: 4, groupName: '(설비 없음)', totalElapsedMinutes: 1200, totalNetOperatingMinutes: 1044, availabilityPercent: 87.0 },
+    { groupId: 1, groupName: '조립기 A', totalElapsedMinutes: 6120, totalOperatingMinutes: 5750, totalNetOperatingMinutes: 5140, availabilityPercent: 89.4 },
+    { groupId: 2, groupName: '검사기 B', totalElapsedMinutes: 4380, totalOperatingMinutes: 3900, totalNetOperatingMinutes: 3021, availabilityPercent: 77.5 },
+    { groupId: 3, groupName: '포장기 C', totalElapsedMinutes: 3960, totalOperatingMinutes: 3850, totalNetOperatingMinutes: 3603, availabilityPercent: 93.6 },
+    { groupId: 4, groupName: '(설비 없음)', totalElapsedMinutes: 1200, totalOperatingMinutes: 1140, totalNetOperatingMinutes: 1044, availabilityPercent: 91.6 },
   ],
 };

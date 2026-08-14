@@ -74,7 +74,6 @@ import {
 import { useToast } from 'primevue/usetoast';
 
 import {api} from '../client.js';
-import * as mock from '../mock/index.js';
 
 const toast = useToast();
 
@@ -283,13 +282,16 @@ async function confirmTime() {
   try {
     if (timeMode.value === 'start') {
       // 이어하기 여부에 따라 payload 모양이 다르다
-      // 이어하기 : 기존 작업지시에 합류 → workOrderId만
+      // 이어하기 : 기존 작업지시에 합류 → workOrderId + 설비(이번 세션 것)
       // 신규 : 작업지시를 새로 만들며 시작 → 라인·공정·설비·목표수량
+      // 설비는 두 경우 다 필요하다 — WorkOrder가 아니라 WorkLog(세션) 소속이라
+      // 이어하기로 합류해도 "이번에 내가 쓸 설비"는 매번 새로 골라야 한다
       const payload = continueMode.value
         ? {
             workerId: workerId.value,
             startTime: iso,
             workOrderId: selectedOrderId.value,
+            equipmentId: equipmentId.value,
           }
         : {
             workerId: workerId.value,
@@ -413,10 +415,6 @@ async function confirmDelete() {
 
 <template>
   <div class="col g-4">
-    <div class="mock-banner">
-      <i class="pi pi-info-circle" />
-      <span>화면 확인용 임시 데이터입니다. API 연동 시 <code>src/mock</code> 을 제거하세요.</span>
-    </div>
 
     <!-- ══ ① 작업자 선택 — 이 화면의 주체 ═══════════════ -->
     <Card>
@@ -460,6 +458,16 @@ async function confirmDelete() {
       </template>
 
       <template #content>
+        <!-- 설비는 WorkOrder가 아니라 WorkLog(세션) 소속이라(§4-16 — 고장/교체 대응),
+             신규 생성이든 이어하기든 "이번 세션에 쓸 설비"는 항상 골라야 한다.
+             그래서 이어하기 on/off와 무관하게 항상 노출한다. 수작업 공정도 있어 nullable이다 -->
+        <div class="field" style="max-width: 240px; margin-bottom: 14px">
+          <label>설비 <span class="opt">(선택)</span></label>
+          <Select v-model="equipmentId" :options="equipments" optionLabel="name" optionValue="id"
+                  placeholder="수작업" showClear
+                  emptyMessage="등록된 설비가 없습니다." />
+        </div>
+
         <!-- ── 이어하기 OFF: 신규 작업지시 생성 ── -->
         <div v-if="!continueMode" class="row wrap g-3">
           <div class="field">
@@ -476,14 +484,6 @@ async function confirmDelete() {
             <Select v-model="processId" :options="processOptions" optionLabel="name" optionValue="id"
                     placeholder="공정 선택" :disabled="!lineId"
                     emptyMessage="선택 가능한 공정이 없습니다." />
-          </div>
-
-          <!-- 설비는 선택 사항 — 수작업 공정도 있어서 nullable 이다 -->
-          <div class="field">
-            <label>설비 <span class="opt">(선택)</span></label>
-            <Select v-model="equipmentId" :options="equipments" optionLabel="name" optionValue="id"
-                    placeholder="수작업" showClear
-                    emptyMessage="등록된 설비가 없습니다." />
           </div>
 
           <div class="field" style="min-width: 130px">
@@ -519,11 +519,20 @@ async function confirmDelete() {
                 <span class="order-id num">#{{ order.id }}</span>
               </div>
               <!-- "진행중 N명"은 지금 붙어 있는 사람 수다. 0명이면 앞사람이 끝낸 걸 이어받는 것이고,
-                   1명 이상이면 병렬로 합류하는 것 — 둘 다 정상 시나리오다(§4-6) -->
+                   1명 이상이면 병렬로 합류하는 것 — 둘 다 정상 시나리오다(§4-6).
+                   설비는 세션(WorkLog)마다 다를 수 있어 여기엔 표시하지 않는다(위에서 이번 세션 설비를 따로 고름) -->
               <div class="order-meta">
-                {{ order.equipmentName ?? '수작업' }} ·
                 <span v-if="order.activeWorkerCount">진행중 {{ order.activeWorkerCount }}명</span>
                 <span v-else>진행중인 작업자 없음</span>
+              </div>
+              <!-- 가장 최근 세션의 시작~종료 + 누가 했는지. 진행중이면 종료가 없어 "~"로 열어둔다.
+                   여러 명이 거쳐간 작업일 수 있어 "이 작업지시의 시간"이 아니라
+                   "가장 최근에 무슨 일이 있었는지"를 보여주는 참고 정보다 -->
+              <div class="order-time num">
+                {{ mmddhhmm(order.lastStartTime) }} ~
+                <span v-if="order.lastEndTime">{{ hhmm(order.lastEndTime) }}</span>
+                <span v-else class="order-time-open">진행 중</span>
+                <span class="order-time-worker">· {{ order.lastWorkerName }}</span>
               </div>
               <!-- 누적 실적 / 목표 — 얼마나 남았는지가 선택 기준이 된다 -->
               <div class="progress">
@@ -804,6 +813,9 @@ async function confirmDelete() {
 
 .order-id { font-size: 12px; color: var(--text-muted); }
 .order-meta { font-size: 12.5px; color: var(--text-muted); }
+.order-time { font-size: 12px; color: var(--text-muted); }
+.order-time-open { color: var(--brand); font-weight: 600; }
+.order-time-worker { color: var(--text-muted); }
 
 .progress {
   height: 6px;

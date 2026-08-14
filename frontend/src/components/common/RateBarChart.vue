@@ -167,7 +167,7 @@ const isVertical = computed(() => props.orientation === 'vertical');
   text-align: right;
 }
 
-/* 실가동 / 조업 을 막대 아래 작게 — 비율만으로는 규모를 알 수 없어서 */
+/* 가동 / 조업 을 막대 아래 작게 — 비율만으로는 규모를 알 수 없어서 */
 .h-sub {
   grid-column: 2 / 4;
   font-size: 11px;

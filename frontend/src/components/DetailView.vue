@@ -3,60 +3,67 @@
  * 상세 조회 화면 (설계 §6-3)
  *
  * 【화면 흐름】
- *   날짜 선택 → 그 날짜의 작업이력 목록(카드) → 카드 클릭 → 하단에 상세
+ *   기간(시작~종료) 선택 → 그 기간의 작업지시 대표 카드 목록 → 카드 클릭
+ *   → 하단에 "작업지시 헤더 1개 + 그 작업지시의 작업이력(세션) 카드 N개"
  *
  *   ID를 직접 입력하는 방식이 아니라 목록에서 고르는 이유는,
  *   사용자가 WorkLog 의 PK를 알아낼 경로가 어디에도 없기 때문이다.
  *   (대시보드는 그룹별 집계만 주고 개별 이력 id는 주지 않는다)
  *
+ * 【목록은 "작업지시 단위" 대표 카드다】
+ *   카드 하나는 WorkLog 하나가 아니라 WorkOrder 하나를 대표한다. 같은 작업지시를
+ *   이어하기로 여러 세션(여러 명, 또는 한 명이 여러 번)에 나눠 수행했다면 그 중
+ *   최근 세션 하나만 목록에 노출하고, 나머지는 클릭했을 때 상세에서 한꺼번에 보여준다.
+ *   목록에 WorkLog 개수만큼 카드가 늘어나면 "이게 다 다른 작업이었나?" 오해가 생기기 쉽다.
+ *
+ * 【상세는 "작업지시 헤더 + 세션 카드 목록"이다】
+ *   작업지시 헤더(1개) — 지시#, 라인·공정, 목표수량/누적실적
+ *   세션 카드(1개 이상) — 이력#, 작업자, 시작~종료, 실적, 시간분해, 정지이력, 삭제 버튼.
+ *   세션이 1건이면 카드도 1장, 여러 건이면 그만큼 나열된다 — 버튼을 눌러야
+ *   펼쳐지는 구조가 아니라 클릭한 순간 전부 보인다.
+ *
+ * 【작업지시 수정은 폐기, 세션 삭제로 대체】
+ *   라인/공정/목표수량을 고치는 기능은 일단 빼고, 오입력·방치 이력을 지우는
+ *   기능으로 바꿨다. 삭제는 세션(WorkLog) 단위로 한다 — 이미 있는
+ *   DELETE /api/work-logs/{id}(§8-3, WorkerDashboard.vue의 "이력 삭제"와 동일 API)를
+ *   그대로 재사용한다. 형제 세션이 없으면 작업지시도 함께 지워진다.
+ *
  * 【진행중 건도 목록에 보여준다】
  *   완료 건만 걸러내지 않는다. 퇴근하며 종료를 잊어 방치된 이력을 찾아
  *   지울 수 있어야 하기 때문이다 (§8-3). 그런 건이 남아 있으면 대시보드의
- *   분모(조업시간)가 계속 커져서 가동률이 실제보다 낮게 나온다.
+ *   분모(부하시간)가 계속 커져서 가동률이 실제보다 낮게 나온다.
  *
  * 【완료 전에는 시간 분해 영역을 숨긴다】
  *   ElapsedMinutes / OperatingMinutes / NetOperatingMinutes 세 캐시 컬럼은
  *   Complete() 시점에만 채워진다 (§3-5). 진행중 건은 전부 null 이라
  *   그대로 그리면 0분 / 0% 라는 틀린 값이 표시된다.
  *   그래서 완료 건에만 분해를 보여주고, 진행중이면 경과 시간만 안내한다.
- *   (서버가 NOW() 기준 잠정값을 내려주게 되면 그때 이 영역을 열면 된다)
  *
  * 【집계 귀속 기준】
  *   목록은 StartTime 기준이라, 자정을 넘긴 야간 작업은 개시일에 묶인다 (§3-6).
  *
  * ────────────────────────────────────────────────────────────────
- * TODO(연동) — 이 화면이 사용할 API
- *   GET   /api/work-logs?date={yyyy-MM-dd}     ★ 신규 필요 (설계 §5에 추가해야 함)
- *         → [{ id, workerId, workerName, lineName, processName, equipmentName,
- *              status, startTime, endTime, actualQty,
- *              elapsedMinutes, operatingMinutes, netOperatingMinutes }]
- *            진행중 건은 시간 3개가 null 로 온다.
- *
- *   GET   /api/work-logs/{id}                  → 상세 (정지 이력 pauses 포함)
- *   GET   /api/lines                           → 수정 다이얼로그의 라인 목록
- *   GET   /api/processes?lineId=               → 선택 라인의 공정 (캐스케이딩)
- *   GET   /api/equipment                       → 설비 목록
- *   PATCH /api/work-orders/{workOrderId}       → {lineId, processId, equipmentId?}
- *                                                라인-공정 조합 위반 시 409
- *
- *   날짜가 바뀌면 목록을 다시 조회하고 선택을 비운다 →
- *     watch(date, () => { fetchList(); selectedId.value = null; })
+ * 【사용 API】
+ *   GET    /api/work-logs?startDate=&endDate=       — 기간별 목록(대표 카드용)
+ *   GET    /api/work-logs/by-order/{workOrderId}     — 대표 카드 클릭 시, 세션 전체
+ *   DELETE /api/work-logs/{id}                       — 세션 삭제, 성공 후 목록+상세 재조회
  * ════════════════════════════════════════════════════════════════ */
 
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useToast } from 'primevue/usetoast';
+import { api } from '../client.js';
 
 /* ── 사용하는 PrimeVue 위젯 ──────────────────────────────────
- * DatePicker : 달력. 여기서는 날짜만 고르므로 showTime 없이 쓴다
- *              showIcon + iconDisplay="input" 이면 입력칸 안에 달력 아이콘이 붙는다
+ * DatePicker   : selectionMode="range" 로 시작~종료 두 날짜를 한 번에 고른다.
+ *                showIcon + iconDisplay="input" 이면 입력칸 안에 달력 아이콘이 붙는다.
+ *                maxDate 로 오늘 이후는 아예 선택 못 하게 막는다
  * SelectButton : 버튼형 라디오. 목록의 상태 필터(전체/완료/미완료)에 쓴다
  * Card       : 카드 컨테이너 (#title #content 슬롯)
  * Tag        : 상태 배지 (진행중/정지중/완료)
  * Button     : 버튼
  * DataTable  : 표 (정지 이력). Column 으로 열을 정의하고 #body 로 셀을 직접 그린다
  * Column     : DataTable 의 열
- * Dialog     : 모달 팝업 (작업지시 수정)
- * Select     : 드롭다운. 수정 팝업에서도 등록 화면과 같은 캐스케이딩 규칙을 적용한다
+ * ConfirmDeleteDialog : 삭제 확인 재사용 컴포넌트(§6-1) — WorkerDashboard.vue와 동일
  * ─────────────────────────────────────────────────────────── */
 import DatePicker from 'primevue/datepicker';
 import SelectButton from 'primevue/selectbutton';
@@ -65,19 +72,21 @@ import Tag from 'primevue/tag';
 import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
-import Dialog from 'primevue/dialog';
-import Select from 'primevue/select';
+import ConfirmDeleteDialog from './common/ConfirmDeleteDialog.vue';
 
 import {
-  hhmm, mmddhhmm, duration, minutesBetween, rateColor,
+  hhmm, mmddhhmm, ymd, duration, minutesBetween, rateColor,
   STATUS_LABEL, STATUS_SEVERITY, CATEGORY_LABEL,
 } from '../utils/format.js';
-import * as mock from '../mock/index.js';
 
 const toast = useToast();
 
-/* ── 목록 조회 ──────────────────────────────────────────── */
-const date = ref(new Date('2026-08-09'));
+/* ── 조회 조건 ──────────────────────────────────────────── */
+const today = new Date();
+/* PrimeVue range 모드는 [시작, 종료] 배열 하나로 v-model 을 받는다.
+ * 종료를 아직 안 고른 중간 상태에선 배열의 두 번째 값이 null 일 수 있다.
+ * 기본값은 오늘 하루 — 방치된 이력을 매일 확인하는 용도라 "오늘"이 제일 흔한 조회다 */
+const dateRange = ref([new Date(), new Date()]);
 
 const statusFilters = [
   { label: '전체', value: 'all' },
@@ -86,8 +95,23 @@ const statusFilters = [
 ];
 const statusFilter = ref('all');
 
-/* TODO(연동) GET /api/work-logs?date= 응답으로 교체 */
-const logs = ref([...mock.workLogsByDate]);
+/* 기간별 목록 — 날짜 범위 필터링은 서버(GetByDateRangeAsync)가 다 하고 내려주므로
+ * 여기선 상태 필터(전체/완료/미완료)만 클라이언트에서 한 번 더 거른다 */
+const logs = ref([]);
+
+async function fetchLogs() {
+  const [start, end] = dateRange.value;
+  if (!start) { logs.value = []; return; }
+  try {
+    logs.value = await api.getWorkLogsByRange(ymd(start), ymd(end ?? start));
+  } catch (err) {
+    logs.value = [];
+    toast.add({
+      severity: 'error', summary: '작업이력 목록을 불러오지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
+}
 
 const filteredLogs = computed(() => {
   if (statusFilter.value === 'done') return logs.value.filter((l) => l.status === 'Completed');
@@ -95,195 +119,202 @@ const filteredLogs = computed(() => {
   return logs.value;
 });
 
-/* 미완료 건수 — 방치된 이력이 있으면 눈에 띄어야 한다 (§8-3) */
+/* 미완료 건수 — 방치된 이력이 있으면 눈에 띄어야 한다 (§8-3). 상태 필터와 무관하게 항상 센다 */
 const openCount = computed(() => logs.value.filter((l) => l.status !== 'Completed').length);
 
-/* 목록 카드에 표시할 가동률. 완료 건만 계산할 수 있다 */
+/* 같은 작업지시(workOrderId)를 공유하는 이력이 여럿이면 대표 1건만 목록에 남긴다.
+ * "대표"는 이 기간 안에서 가장 최근에 시작된 세션 — 최신 진행 상황을 보여주는 게 목적이라서다.
+ * 나머지 세션은 카드를 클릭했을 때 상세에서 한꺼번에 보여준다(siblingLogs) */
+const representativeLogs = computed(() => {
+  const sorted = [...filteredLogs.value].sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+  const seen = new Set();
+  const result = [];
+  for (const log of sorted) {
+    if (seen.has(log.workOrderId)) continue;
+    seen.add(log.workOrderId);
+    result.push(log);
+  }
+  return result;
+});
+
+/* 목록 카드에 표시할 가동률. 완료 건만 계산할 수 있다.
+ * 상세의 breakdownOf()와 같은 공식(가동/부하시간, §3-4) — 분모를 elapsed로 잘못 쓰면
+ * 이 카드와 상세 화면이 같은 이력을 두고 서로 다른 %를 보여주게 된다 */
 function rateOf(log) {
-  if (log.status !== 'Completed' || !log.elapsedMinutes) return null;
-  return (log.netOperatingMinutes / log.elapsedMinutes) * 100;
+  if (log.status !== 'Completed' || !log.operatingMinutes) return null;
+  return (log.netOperatingMinutes / log.operatingMinutes) * 100;
 }
 
 /* ── 선택 / 상세 ────────────────────────────────────────── */
-const selectedId = ref(null);
+/* WorkLog 가 아니라 WorkOrder 를 선택 단위로 삼는다 — 클릭 한 번으로
+ * 그 작업지시에 딸린 세션을 전부 보여주는 게 목표라서다 */
+const selectedWorkOrderId = ref(null);
 
-/* 날짜를 바꾸면 목록이 달라지므로 선택을 비운다 */
-watch(date, () => {
-  selectedId.value = null;
-  // TODO(연동) 여기서 목록 재조회
+/* 기간이 바뀌면 목록이 달라지므로 선택을 비우고 다시 조회한다 */
+watch(dateRange, () => {
+  selectedWorkOrderId.value = null;
+  fetchLogs();
 });
 
-/* 목록 행 + 상세(정지 이력)를 합친 것이 화면에 그릴 최종 데이터.
- * TODO(연동) 실제로는 카드 클릭 시 GET /api/work-logs/{id} 를 호출해 통째로 받는다 */
-const detail = computed(() => {
-  if (!selectedId.value) return null;
-  const row = logs.value.find((l) => l.id === selectedId.value);
-  if (!row) return null;
-  return { ...row, ...(mock.workLogDetails[selectedId.value] ?? { pauses: [] }) };
-});
+onMounted(fetchLogs);
 
-const isCompleted = computed(() => detail.value?.status === 'Completed');
+/* 선택된 작업지시의 모든 세션(WorkLog) — 날짜 범위·상태 필터와 무관하게 전체를 받는다.
+ * 이어하기가 날짜 경계를 넘나들 수 있어서, 지금 화면에 걸린 기간 밖의 세션도 "형제"일 수 있다 */
+const siblingLogs = ref([]);
 
-/* 같은 작업지시에 붙어 있는 다른 작업이력 수.
- *
- * ⚠ 중요한 구분 — 아래 "작업지시 수정"은 WorkLog 가 아니라 WorkOrder 를 고친다.
- *   라인·공정·설비는 WorkOrder 가 소유하고 WorkLog 는 WorkOrderId FK 하나만 갖기 때문(§4-4).
- *   따라서 이어하기로 여러 명이 붙은 작업지시라면, 한 사람의 카드에서 수정해도
- *   나머지 작업자들의 이력에 표시되는 라인·공정까지 함께 바뀐다.
- *   사용자는 "이 이력만 고친다"고 오해하기 쉬우므로 건수를 미리 알려준다.
- *
- * TODO(연동) 목록 응답에 workOrderId 가 포함되면 그걸로 세면 된다.
- *   서버가 siblingCount 를 내려주는 편이 더 정확하다(다른 날짜의 형제 이력까지 포함되므로) */
-const siblingCount = computed(() => {
-  if (!detail.value?.workOrderId) return 0;
-  return logs.value.filter(
-    (l) => (mock.workLogDetails[l.id]?.workOrderId) === detail.value.workOrderId
-      && l.id !== detail.value.id,
-  ).length;
+async function fetchSiblingLogs(workOrderId) {
+  try {
+    siblingLogs.value = await api.getWorkLogsByOrder(workOrderId);
+  } catch (err) {
+    siblingLogs.value = [];
+    toast.add({
+      severity: 'error', summary: '작업지시 상세를 불러오지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
+}
+
+function selectOrder(workOrderId) {
+  selectedWorkOrderId.value = workOrderId;
+  fetchSiblingLogs(workOrderId);
+}
+
+/* 작업지시 헤더에 쓸 요약 — 라인/공정/목표수량은 형제끼리 항상 같은 값이라
+ * 대표로 첫 세션 것을 쓰면 되고, 누적실적만 세션들을 합산한다 */
+const orderSummary = computed(() => {
+  const first = siblingLogs.value[0];
+  if (!first) return null;
+  const completedQty = siblingLogs.value
+    .filter((l) => l.status === 'Completed')
+    .reduce((sum, l) => sum + l.actualQty, 0);
+  return {
+    workOrderId: first.workOrderId,
+    lineName: first.lineName,
+    processName: first.processName,
+    targetQty: first.targetQty,
+    completedQty,
+  };
 });
 
 /* 완료 전 경과 시간 — 캐시값이 없으니 현재 시각 기준으로 계산해 보여준다 */
-const runningMinutes = computed(() =>
-  detail.value ? minutesBetween(detail.value.startTime, null) : 0,
-);
+function runningMinutesOf(log) {
+  return minutesBetween(log.startTime, null);
+}
 
 /* ── 시간 분해 (§3-4) ────────────────────────────────────
- * 조업시간 = 실가동 + 계획정지 + 비가동
- * 완료 시점에 서버가 캐시해둔 3개 값에서 역산한다 */
-const breakdown = computed(() => {
-  const d = detail.value;
-  if (!d || d.status !== 'Completed') return null;
+ * 조업시간 = 가동 + 계획정지 + 비가동. 세션(WorkLog) 하나마다 따로 계산한다 */
+function breakdownOf(log) {
+  if (log.status !== 'Completed') return null;
 
-  const elapsed = d.elapsedMinutes ?? 0;
-  const planned = elapsed - (d.operatingMinutes ?? 0);                       // 조업 − 가동
-  const unplanned = (d.operatingMinutes ?? 0) - (d.netOperatingMinutes ?? 0); // 가동 − 실가동
-  const net = d.netOperatingMinutes ?? 0;
+  const elapsed = log.elapsedMinutes ?? 0;
+  const operating = log.operatingMinutes ?? 0;
+  const planned = elapsed - operating;                       // 조업 − 부하
+  const unplanned = operating - (log.netOperatingMinutes ?? 0); // 부하 − 가동
+  const net = log.netOperatingMinutes ?? 0;
+  // 세 조각(netPct/plannedPct/unplannedPct)은 막대 전체(조업시간)를 100으로 보는 "구성비"라 elapsed로 나눈다.
+  // 가동률(rate) 자체는 §3-4대로 가동/부하시간 — 계획정지는 애초에 가동 대상이 아니었으므로 분모에서 뺀다
   const pct = (v) => (elapsed === 0 ? 0 : (v / elapsed) * 100);
 
   return {
     elapsed, planned, unplanned, net,
     netPct: pct(net), plannedPct: pct(planned), unplannedPct: pct(unplanned),
-    rate: pct(net),
+    rate: operating === 0 ? 0 : (net / operating) * 100,
   };
-});
-
-/* ── 작업지시 수정 다이얼로그 (§4-8, §4-9) ────────────────
- * 라인이 파생값에서 사용자 입력값이 되면서 오선택을 시스템이 탐지할 수 없게 됐다.
- * 그래서 대응을 "검증"이 아니라 "정정 경로"로 잡았다. */
-const editDialog = ref(false);
-const editLineId = ref(null);
-const editProcessId = ref(null);
-const editEquipmentId = ref(null);
-
-const lines = ref(mock.lines.filter((l) => l.isActive));
-const allProcesses = ref(mock.processes);
-const equipments = ref(mock.equipments.filter((e) => e.isActive));
-
-/* 등록 화면과 동일한 캐스케이딩 — 라인을 골라야 공정이 열린다 */
-const editProcessOptions = computed(() => {
-  if (!editLineId.value) return [];
-  return allProcesses.value.filter(
-    (p) => p.isActive && p.lineIds.includes(editLineId.value),
-  );
-});
-
-function openEdit() {
-  editLineId.value = detail.value.lineId;
-  editProcessId.value = detail.value.processId;
-  editEquipmentId.value = detail.value.equipmentId;
-  editDialog.value = true;
 }
 
-/* 라인이 바뀌면 기존 공정이 새 라인에 속하지 않을 수 있으므로 비운다 */
-function onEditLineChange() {
-  editProcessId.value = null;
+/* ══ 세션 삭제 ══════════════════════════════════════════
+ * 오입력이나 종료를 잊고 방치된 이력을 지우는 경로 (§8-3).
+ * WorkerDashboard.vue의 "이력 삭제"와 같은 API(DELETE /api/work-logs/{id})를 쓴다 —
+ * 다만 여기는 "지금 진행중인 내 세션"이 아니라 "과거 아무 세션"을 대상으로 한다는 게 다르다 */
+const deleteDialog = ref(false);
+const deleteTarget = ref(null);
+
+function askDelete(log) {
+  deleteTarget.value = log;
+  deleteDialog.value = true;
 }
 
-const canSaveEdit = computed(() => !!(editLineId.value && editProcessId.value));
+async function confirmDeleteLog() {
+  try {
+    // 응답 { result: "deleted" | "deleted_with_order" } — 지금은 문구를 안 나누고
+    // 둘 다 같은 성공 토스트로 안내한다(§8-3, WorkerDashboard.vue의 삭제와 동일 수준)
+    await api.deleteWorkLog(deleteTarget.value.id);
 
-/* 저장 확인 팝업.
- *
- * §6-1 은 "수정/저장은 되돌릴 수 있는 작업이라 확인창을 붙이지 않는다"가 원칙이지만,
- * 이 수정은 예외다 — WorkOrder 를 바꾸는 것이라 같은 작업지시를 함께 수행한
- * 다른 작업자들의 이력에도 반영된다. 사용자는 "이 이력만 고친다"고 오해하기 쉽다.
- *
- * 다만 확인창을 남발하면 경고력이 떨어지므로(§6-1),
- * 형제 이력이 있을 때만 띄우고 혼자 수행한 건은 바로 저장한다. */
-const confirmDialog = ref(false);
+    toast.add({
+      severity: 'success',
+      summary: '작업이력을 삭제했습니다.',
+      life: 2500,
+    });
 
-function requestSave() {
-  if (siblingCount.value > 0) {
-    confirmDialog.value = true;
-    return;
+    deleteDialog.value = false;
+
+    // 목록과 상세를 최신 상태로 다시 받아온다 — 부분 병합 대신 재조회(§4-13 근처에서 쓴 것과 같은 패턴)
+    await fetchLogs();
+    if (selectedWorkOrderId.value) await fetchSiblingLogs(selectedWorkOrderId.value);
+
+    // 이 작업지시에 남은 세션이 없으면 상세를 닫는다(형제 없이 지워졌다면 작업지시도 함께 사라진 것)
+    if (!siblingLogs.value.length) selectedWorkOrderId.value = null;
+  } catch (err) {
+    toast.add({
+      severity: 'error', summary: '삭제하지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
   }
-  saveEdit();
-}
-
-function saveEdit() {
-  // TODO(연동) PATCH /api/work-orders/{detail.workOrderId}
-  //   {lineId: editLineId, processId: editProcessId, equipmentId: editEquipmentId}
-  //   성공하면 목록과 상세를 다시 조회한다. 조합 위반 시 409 + ProblemDetails
-  toast.add({
-    severity: 'success',
-    summary: '작업 정보를 변경했습니다.',
-    detail: siblingCount.value > 0
-      ? `함께 진행한 기록 ${siblingCount.value}건에도 반영되었습니다.`
-      : undefined,
-    life: 3000,
-  });
-  confirmDialog.value = false;
-  editDialog.value = false;
 }
 </script>
 
 <template>
   <div class="col g-4">
-    <div class="mock-banner">
-      <i class="pi pi-info-circle" />
-      <span>화면 확인용 임시 데이터입니다. API 연동 시 <code>src/mock</code> 을 제거하세요.</span>
-    </div>
-
     <!-- ══ 1. 조회 조건 ═════════════════════════════════ -->
     <Card>
       <template #content>
-        <div class="row wrap g-5">
+        <!-- 기간은 왼쪽 고정, 미완료 경고 + 상태 필터는 오른쪽으로 묶어서 정렬 -->
+        <div class="row between wrap g-5">
           <div class="field">
-            <label>날짜</label>
-            <DatePicker v-model="date" dateFormat="yy-mm-dd" showIcon iconDisplay="input" :manualInput="false" />
+            <label>기간</label>
+            <DatePicker v-model="dateRange" selectionMode="range" dateFormat="yy-mm-dd"
+                        showIcon iconDisplay="input" :manualInput="false" :maxDate="today"
+                        class="range-picker" />
           </div>
 
-          <div class="field">
-            <label>상태</label>
-            <SelectButton v-model="statusFilter" :options="statusFilters"
-                          optionLabel="label" optionValue="value" :allowEmpty="false" />
-          </div>
+          <div class="row wrap g-4" style="align-items: flex-end">
+            <!-- 종료를 잊고 방치된 건이 있으면 눈에 띄게 (§8-3) -->
+            <div v-if="openCount" class="field">
+              <span class="open-warn">
+                <i class="pi pi-exclamation-circle" />
+                미완료 {{ openCount }}건
+              </span>
+            </div>
 
-          <!-- 종료를 잊고 방치된 건이 있으면 눈에 띄게 (§8-3) -->
-          <div v-if="openCount" class="field" style="justify-content: flex-end">
-            <span class="open-warn">
-              <i class="pi pi-exclamation-circle" />
-              미완료 {{ openCount }}건
-            </span>
+            <div class="field">
+              <label>상태</label>
+              <SelectButton v-model="statusFilter" :options="statusFilters"
+                            optionLabel="label" optionValue="value" :allowEmpty="false" />
+            </div>
           </div>
         </div>
 
         <div class="row g-2 mt-3 hint">
           <i class="pi pi-info-circle" style="font-size: 12px" />
-          <span>작업을 <strong>시작한 날짜</strong>를 기준으로 보여줍니다. 밤을 넘겨 이어진 작업은 시작한 날에 표시됩니다.</span>
+          <span>
+            <strong>{{ ymd(dateRange[0]) }} ~ {{ ymd(dateRange[1] ?? dateRange[0]) }}</strong>
+            동안 <strong>시작한</strong> 작업 이력을 보여줍니다. 밤을 넘겨 이어진 작업은 시작한 날에 표시됩니다.
+            오늘 이후 날짜는 고를 수 없습니다.
+          </span>
         </div>
       </template>
     </Card>
 
-    <!-- ══ 2. 목록 (카드) ═══════════════════════════════ -->
-    <div v-if="!filteredLogs.length" class="empty">
-      선택한 날짜에 작업 이력이 없습니다.
+    <!-- ══ 2. 목록 (작업지시 대표 카드) ═══════════════════ -->
+    <div v-if="!representativeLogs.length" class="empty">
+      선택한 기간에 작업 이력이 없습니다.
     </div>
 
     <div v-else class="log-list">
       <button
-        v-for="log in filteredLogs" :key="log.id"
-        class="log-card" :class="{ picked: selectedId === log.id }"
-        @click="selectedId = log.id"
+        v-for="log in representativeLogs" :key="log.workOrderId"
+        class="log-card" :class="{ picked: selectedWorkOrderId === log.workOrderId }"
+        @click="selectOrder(log.workOrderId)"
       >
         <div class="row between g-2">
           <strong>{{ log.workerName }}</strong>
@@ -304,220 +335,182 @@ function saveEdit() {
           <span v-else class="log-rate pending">—</span>
         </div>
 
-        <div class="log-id num">#{{ log.id }}</div>
+        <!-- 화면 구석 — 이 이력이 어느 작업지시 소속인지 항상 보이게 -->
+        <div class="log-id num">지시#{{ log.workOrderId }} · 이력#{{ log.id }}</div>
       </button>
     </div>
 
     <!-- ══ 3. 상세 ══════════════════════════════════════ -->
-    <div v-if="!selectedId" class="empty">
+    <div v-if="!selectedWorkOrderId" class="empty">
       위 목록에서 작업을 선택해 주세요.
     </div>
 
-    <template v-else-if="detail">
-      <!-- 요약 -->
+    <template v-else-if="orderSummary">
+      <!-- 작업지시 헤더 — 세션이 몇 건이든 딱 한 번만 나온다 -->
       <Card>
+        <template #title>
+          <span class="order-title">작업지시 #{{ orderSummary.workOrderId }}</span>
+        </template>
+
+        <template #content>
+          <div class="row wrap g-3 between">
+            <div class="row wrap g-3">
+              <div class="metric"><div class="k">라인</div><div class="v sm">{{ orderSummary.lineName }}</div></div>
+              <div class="metric"><div class="k">공정</div><div class="v sm">{{ orderSummary.processName }}</div></div>
+              <div class="metric"><div class="k">세션 수</div><div class="v sm num">{{ siblingLogs.length }}건</div></div>
+            </div>
+
+            <div class="progress-metric">
+              <div class="row between g-2">
+                <span class="k">목표 대비 누적 실적</span>
+                <span class="v sm num">{{ orderSummary.completedQty }} / {{ orderSummary.targetQty }}개</span>
+              </div>
+              <div class="progress">
+                <div class="progress-fill"
+                     :style="{ width: Math.min(100, (orderSummary.completedQty / orderSummary.targetQty) * 100) + '%' }" />
+              </div>
+            </div>
+          </div>
+        </template>
+      </Card>
+
+      <!-- 세션(WorkLog) 카드 — 있는 만큼 그대로 나열. 형제가 여럿이면 함께 진행했다는 뜻 -->
+      <Card v-for="log in siblingLogs" :key="log.id">
         <template #title>
           <div class="row between wrap g-2">
             <div class="row g-2">
-              <span>작업이력 #{{ detail.id }}</span>
-              <Tag :value="STATUS_LABEL[detail.status]" :severity="STATUS_SEVERITY[detail.status]" />
+              <strong>{{ log.workerName }}</strong>
+              <Tag :value="STATUS_LABEL[log.status]" :severity="STATUS_SEVERITY[log.status]" />
             </div>
-            <Button label="작업지시 수정" icon="pi pi-pencil" severity="secondary" outlined
-                    size="small" @click="openEdit" />
-          </div>
-        </template>
-
-        <template #content>
-          <div class="row wrap g-3">
-            <div class="metric"><div class="k">라인</div><div class="v sm">{{ detail.lineName }}</div></div>
-            <div class="metric"><div class="k">공정</div><div class="v sm">{{ detail.processName }}</div></div>
-            <div class="metric"><div class="k">설비</div><div class="v sm">{{ detail.equipmentName ?? '수작업' }}</div></div>
-            <div class="metric"><div class="k">작업자</div><div class="v sm">{{ detail.workerName }}</div></div>
-            <div class="metric"><div class="k">실제 시작</div><div class="v sm num">{{ mmddhhmm(detail.startTime) }}</div></div>
-            <div class="metric">
-              <div class="k">실제 종료</div>
-              <div class="v sm num">{{ detail.endTime ? mmddhhmm(detail.endTime) : '-' }}</div>
-            </div>
-            <div v-if="isCompleted" class="metric">
-              <div class="k">실적 수량</div><div class="v num">{{ detail.actualQty }}<small>개</small></div>
+            <div class="row g-1" style="align-items: center">
+              <!-- 화면 구석 — 이 세션의 작업이력 번호 -->
+              <span class="session-id num">이력#{{ log.id }}</span>
+              <Button icon="pi pi-trash" severity="danger" text size="small"
+                      aria-label="작업이력 삭제" @click="askDelete(log)" />
             </div>
           </div>
         </template>
-      </Card>
 
-      <!-- 시간 분해 — 완료 건에만 (§3-5의 캐시 컬럼이 그때 채워지므로) -->
-      <Card v-if="isCompleted && breakdown">
-        <template #title>시간 분해 · 가동률</template>
         <template #content>
           <div class="col g-4">
-            <div class="row wrap g-4">
-              <div class="rate" :style="{ color: rateColor(breakdown.rate) }">
-                {{ breakdown.rate.toFixed(1) }}<small>%</small>
+            <div class="row wrap g-3">
+              <div class="metric"><div class="k">설비</div><div class="v sm">{{ log.equipmentName ?? '수작업' }}</div></div>
+              <div class="metric"><div class="k">시작</div><div class="v sm num">{{ mmddhhmm(log.startTime) }}</div></div>
+              <div class="metric">
+                <div class="k">종료</div>
+                <div class="v sm num">{{ log.endTime ? mmddhhmm(log.endTime) : '-' }}</div>
               </div>
-              <div class="rate-formula hint">
-                실가동시간 {{ duration(breakdown.net) }} ÷ 조업시간 {{ duration(breakdown.elapsed) }}
+              <div v-if="log.status === 'Completed'" class="metric">
+                <div class="k">실적 수량</div><div class="v num">{{ log.actualQty }}<small>개</small></div>
               </div>
             </div>
 
-            <!-- 조업시간 100% 를 세 조각으로. 폭이 곧 손실의 크기라 원인이 빨리 읽힌다 -->
-            <div class="stack">
-              <div class="seg net" :style="{ width: breakdown.netPct + '%' }" />
-              <div class="seg planned" :style="{ width: breakdown.plannedPct + '%' }" />
-              <div class="seg unplanned" :style="{ width: breakdown.unplannedPct + '%' }" />
+            <!-- 시간 분해 — 완료 건에만 (§3-5의 캐시 컬럼이 그때 채워지므로) -->
+            <div v-if="log.status === 'Completed' && breakdownOf(log)" class="col g-4">
+              <div class="row wrap g-4">
+                <div class="rate" :style="{ color: rateColor(breakdownOf(log).rate) }">
+                  {{ breakdownOf(log).rate.toFixed(1) }}<small>%</small>
+                </div>
+                <div class="rate-formula hint">
+                  가동시간 {{ duration(breakdownOf(log).net) }} ÷ 부하시간 {{ duration(log.operatingMinutes) }}
+                </div>
+              </div>
+
+              <!-- 조업시간 100% 를 세 조각으로. 폭이 곧 손실의 크기라 원인이 빨리 읽힌다 -->
+              <div class="stack">
+                <div class="seg net" :style="{ width: breakdownOf(log).netPct + '%' }" />
+                <div class="seg planned" :style="{ width: breakdownOf(log).plannedPct + '%' }" />
+                <div class="seg unplanned" :style="{ width: breakdownOf(log).unplannedPct + '%' }" />
+              </div>
+
+              <div class="row wrap g-4 legend">
+                <span><i class="sw net" />가동 {{ duration(breakdownOf(log).net) }}</span>
+                <span><i class="sw planned" />계획정지 {{ duration(breakdownOf(log).planned) }}</span>
+                <span><i class="sw unplanned" />비가동 {{ duration(breakdownOf(log).unplanned) }}</span>
+              </div>
+
+              <div class="formula">
+                <div><span>조업시간</span><b class="num">{{ duration(breakdownOf(log).elapsed) }}</b><em>종료 − 시작</em></div>
+                <div><span>부하시간</span><b class="num">{{ duration(log.operatingMinutes) }}</b><em>조업 − 계획정지</em></div>
+                <div><span>가동시간</span><b class="num">{{ duration(log.netOperatingMinutes) }}</b><em>부하 − 비가동</em></div>
+              </div>
             </div>
 
-            <div class="row wrap g-4 legend">
-              <span><i class="sw net" />실가동 {{ duration(breakdown.net) }}</span>
-              <span><i class="sw planned" />계획정지 {{ duration(breakdown.planned) }}</span>
-              <span><i class="sw unplanned" />비가동 {{ duration(breakdown.unplanned) }}</span>
-            </div>
-
-            <div class="formula">
-              <div><span>조업시간</span><b class="num">{{ duration(breakdown.elapsed) }}</b><em>종료 − 시작</em></div>
-              <div><span>가동시간</span><b class="num">{{ duration(detail.operatingMinutes) }}</b><em>조업 − 계획정지</em></div>
-              <div><span>실가동시간</span><b class="num">{{ duration(detail.netOperatingMinutes) }}</b><em>가동 − 비가동</em></div>
-            </div>
-          </div>
-        </template>
-      </Card>
-
-      <!-- 완료 전: 분해 대신 경과 시간만. 캐시값이 없어 가동률을 확정할 수 없다 -->
-      <Card v-else>
-        <template #title>시간 분해 · 가동률</template>
-        <template #content>
-          <div class="pending-box">
-            <i class="pi pi-clock" />
-            <div class="col g-1">
-              <strong>아직 진행 중인 작업입니다</strong>
-              <span class="hint">
-                가동률은 작업을 완료해야 계산됩니다.
-                지금까지 <b class="num">{{ duration(runningMinutes) }}</b> 경과했습니다.
-              </span>
-            </div>
-          </div>
-        </template>
-      </Card>
-
-      <!-- 정지 이력 -->
-      <Card>
-        <template #title>정지 이력 ({{ detail.pauses.length }}건)</template>
-        <template #content>
-          <div v-if="!detail.pauses.length" class="empty">정지 기록이 없습니다.</div>
-
-          <DataTable v-else :value="detail.pauses" size="small" stripedRows>
-            <Column field="reasonName" header="사유" />
-
-            <Column header="분류" style="width: 110px">
-              <template #body="{ data }">
-                <span class="cat-badge" :class="data.category === 'Planned' ? 'planned' : 'unplanned'">
-                  {{ CATEGORY_LABEL[data.category] }}
+            <!-- 완료 전: 분해 대신 경과 시간만. 캐시값이 없어 가동률을 확정할 수 없다 -->
+            <div v-else class="pending-box">
+              <i class="pi pi-clock" />
+              <div class="col g-1">
+                <strong>아직 진행 중인 세션입니다</strong>
+                <span class="hint">
+                  가동률은 완료해야 계산됩니다.
+                  지금까지 <b class="num">{{ duration(runningMinutesOf(log)) }}</b> 경과했습니다.
                 </span>
-              </template>
-            </Column>
+              </div>
+            </div>
 
-            <Column header="정지" style="width: 90px">
-              <template #body="{ data }"><span class="num">{{ hhmm(data.pausedAt) }}</span></template>
-            </Column>
+            <!-- 정지 이력 -->
+            <div class="col g-2">
+              <div class="pause-title">정지 이력 ({{ log.pauses.length }}건)</div>
+              <div v-if="!log.pauses.length" class="empty">정지 기록이 없습니다.</div>
 
-            <Column header="재개" style="width: 100px">
-              <template #body="{ data }">
-                <!-- 재개되지 않은 "열린 정지" — 현재 정지 중이라는 뜻 -->
-                <span v-if="data.resumedAt" class="num">{{ hhmm(data.resumedAt) }}</span>
-                <span v-else class="open-pause">정지 중</span>
-              </template>
-            </Column>
+              <DataTable v-else :value="log.pauses" size="small" stripedRows>
+                <Column field="reasonName" header="사유" />
 
-            <Column header="소요" style="width: 100px">
-              <template #body="{ data }">
-                <span class="num">
-                  {{ data.resumedAt ? duration(minutesBetween(data.pausedAt, data.resumedAt)) : '-' }}
-                </span>
-              </template>
-            </Column>
-          </DataTable>
-        </template>
-      </Card>
+                <Column header="분류" style="width: 110px">
+                  <template #body="{ data }">
+                    <span class="cat-badge" :class="data.category === 'Planned' ? 'planned' : 'unplanned'">
+                      {{ CATEGORY_LABEL[data.category] }}
+                    </span>
+                  </template>
+                </Column>
 
-      <!-- ══ 4. 작업지시 수정 다이얼로그 ═════════════════ -->
-      <Dialog v-model:visible="editDialog" modal header="작업지시 수정"
-              :style="{ width: '420px' }" :draggable="false">
-        <div class="col g-3">
-          <p class="hint" style="margin: 0">
-            라인이나 공정을 잘못 선택한 경우 여기서 바로잡을 수 있습니다.
-            기록된 작업 시간과 가동률은 그대로 유지됩니다.
-          </p>
+                <Column header="정지" style="width: 90px">
+                  <template #body="{ data }"><span class="num">{{ hhmm(data.pausedAt) }}</span></template>
+                </Column>
 
-          <!-- 이 수정은 WorkLog 가 아니라 WorkOrder 를 바꾼다.
-               같은 작업지시에 다른 작업자의 이력이 붙어 있으면 그쪽도 함께 바뀐다 -->
-          <div v-if="siblingCount > 0" class="sibling-warn">
-            <i class="pi pi-exclamation-triangle" />
-            <div class="col g-1">
-              <strong>같은 작업을 진행한 {{ siblingCount }}건도 함께 바뀝니다</strong>
-              <span>
-                라인 · 공정 · 설비는 작업 단위로 관리되어, 이 작업을 함께 진행한
-                다른 작업자의 기록에도 똑같이 반영됩니다.
-              </span>
+                <Column header="재개" style="width: 100px">
+                  <template #body="{ data }">
+                    <!-- 재개되지 않은 "열린 정지" — 현재 정지 중이라는 뜻 -->
+                    <span v-if="data.resumedAt" class="num">{{ hhmm(data.resumedAt) }}</span>
+                    <span v-else class="open-pause">정지 중</span>
+                  </template>
+                </Column>
+
+                <Column header="소요" style="width: 100px">
+                  <template #body="{ data }">
+                    <span class="num">
+                      {{ data.resumedAt ? duration(minutesBetween(data.pausedAt, data.resumedAt)) : '-' }}
+                    </span>
+                  </template>
+                </Column>
+              </DataTable>
             </div>
           </div>
-
-          <div class="field">
-            <label>라인</label>
-            <Select v-model="editLineId" :options="lines" optionLabel="name" optionValue="id"
-                    placeholder="라인 선택" fluid @change="onEditLineChange"
-                    emptyMessage="등록된 라인이 없습니다." />
-          </div>
-
-          <div class="field">
-            <label>공정</label>
-            <Select v-model="editProcessId" :options="editProcessOptions" optionLabel="name" optionValue="id"
-                    placeholder="공정 선택" :disabled="!editLineId" fluid
-                    emptyMessage="선택 가능한 공정이 없습니다." />
-          </div>
-
-          <div class="field">
-            <label>설비 <span class="opt">(선택)</span></label>
-            <Select v-model="editEquipmentId" :options="equipments" optionLabel="name" optionValue="id"
-                    placeholder="수작업" showClear fluid
-                    emptyMessage="등록된 설비가 없습니다." />
-          </div>
-        </div>
-
-        <template #footer>
-          <Button label="취소" text severity="secondary" @click="editDialog = false" />
-          <Button label="저장" :disabled="!canSaveEdit" @click="requestSave" />
         </template>
-      </Dialog>
-
-      <!-- ══ 5. 저장 확인 (형제 이력이 있을 때만) ═══════ -->
-      <Dialog v-model:visible="confirmDialog" modal header="작업지시 변경 확인"
-              :style="{ width: '420px' }" :draggable="false">
-        <div class="col g-3">
-          <div class="severe-strip">
-            <i class="pi pi-exclamation-triangle" />
-            <span>나 혼자만의 기록이 아닙니다.</span>
-          </div>
-
-          <p class="confirm-question">
-            이 작업의 라인 · 공정 · 설비를 바꾸시겠습니까?
-          </p>
-
-          <ul class="confirm-notes">
-            <li>같은 작업을 함께 진행한 <b>다른 작업자의 기록 {{ siblingCount }}건</b>도 함께 바뀝니다.</li>
-            <li>이미 기록된 작업 시간과 가동률은 그대로 유지됩니다.</li>
-            <li>바꾼 뒤에도 이 화면에서 다시 수정할 수 있습니다.</li>
-          </ul>
-        </div>
-
-        <template #footer>
-          <Button label="취소" text severity="secondary" autofocus @click="confirmDialog = false" />
-          <Button label="변경" severity="warn" @click="saveEdit" />
-        </template>
-      </Dialog>
+      </Card>
     </template>
+
+    <!-- ══ 4. 삭제 확인 ═══════════════════════════════════ -->
+    <ConfirmDeleteDialog
+      v-model:visible="deleteDialog"
+      header="작업이력 삭제"
+      question="이 작업이력을 삭제하시겠습니까?"
+      severe
+      :notes="[
+        '정지 기록도 함께 지워집니다.',
+        '이 작업을 진행한 사람이 이 세션뿐이면 작업지시도 함께 지워집니다.',
+        '한 번 지우면 되돌릴 수 없고, 가동률에도 반영되지 않습니다.',
+      ]"
+      @confirm="confirmDeleteLog"
+    />
   </div>
 </template>
 
 <style scoped>
+/* ── 조회 조건 ── */
+/* range 모드는 "yyyy-mm-dd - yyyy-mm-dd" 두 날짜를 한 입력칸에 표시해 기본 폭으로는 잘린다 */
+.range-picker :deep(input) { width: 250px; }
+
 /* ── 목록 카드 ── */
 .log-list {
   display: grid;
@@ -530,7 +523,7 @@ function saveEdit() {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  padding: 12px 14px;
+  padding: 12px 14px 26px;
   border: 1.5px solid var(--surface-border);
   border-radius: 10px;
   background: var(--surface-card);
@@ -553,11 +546,10 @@ function saveEdit() {
 
 .log-id {
   position: absolute;
-  top: 10px; right: 12px;
+  bottom: 8px; right: 12px;
   font-size: 10.5px;
   color: var(--text-muted);
 }
-.log-card :deep(.p-tag) { margin-right: 34px; }
 
 /* 미완료 건수 경고 */
 .open-warn {
@@ -573,8 +565,24 @@ function saveEdit() {
   padding: 5px 11px;
 }
 
-/* ── 상세 ── */
+/* ── 작업지시 헤더 ── */
+.order-title { font-size: 15px; font-weight: 700; color: var(--text-strong); }
+.progress-metric { min-width: 220px; flex: 1; }
+.progress-metric .progress { margin-top: 6px; }
+
+/* 세션 카드 구석의 이력 번호 */
+.session-id { font-size: 11px; color: var(--text-muted); }
+
+/* ── 상세 공통 ── */
 .metric .v.sm { font-size: 16px; }
+
+.progress {
+  height: 6px;
+  background: var(--surface-muted);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill { height: 100%; background: var(--brand); border-radius: 3px; }
 
 .rate {
   font-size: 44px;
@@ -638,6 +646,8 @@ function saveEdit() {
 .pending-box > i { font-size: 18px; color: var(--text-muted); margin-top: 2px; }
 .pending-box strong { color: var(--text-strong); font-size: 14px; }
 
+.pause-title { font-size: 13px; font-weight: 600; color: var(--text-strong); }
+
 .cat-badge {
   font-size: 11px;
   padding: 2px 8px;
@@ -652,55 +662,6 @@ function saveEdit() {
   font-weight: 600;
   color: #9a5722;
 }
-
-/* 저장 확인 팝업 */
-.severe-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 11px;
-  border-radius: 8px;
-  background: #fff5e6;
-  color: #8a6320;
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.confirm-question {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-strong);
-  line-height: 1.45;
-}
-
-.confirm-notes {
-  margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-normal);
-  line-height: 1.5;
-}
-.confirm-notes b { color: var(--text-strong); }
-
-/* 형제 작업이력 동시 변경 경고 */
-.sibling-warn {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #fff5e6;
-  border: 1px solid #f0d5a8;
-  color: #8a6320;
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-.sibling-warn > i { margin-top: 2px; }
-.sibling-warn strong { font-size: 13px; }
 
 .opt { font-weight: 400; color: var(--text-muted); }
 </style>

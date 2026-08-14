@@ -47,7 +47,7 @@ watch(activeTab, (tab) => {
       <div class="brand">
         <span class="mark">MES</span>
         <div class="col">
-          <h1>Worklog</h1>
+          <h1>작업관리</h1>
           <span class="tagline">작업자별 작업 추적 · OEE 시간가동률</span>
         </div>
       </div>

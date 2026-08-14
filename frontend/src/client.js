@@ -164,8 +164,9 @@ export const api = {
         ),
 
     // POST /api/work-logs/start
-    // 이어하기:  { workerId, startTime, workOrderId }
+    // 이어하기:  { workerId, startTime, workOrderId, equipmentId? }
     // 신규 생성: { workerId, startTime, lineId, processId, equipmentId?, targetQty }
+    // 설비는 WorkOrder가 아니라 WorkLog(세션) 소속이라 두 형태 모두에 들어간다.
     // 두 형태가 필드 구성이 아예 달라서, 고정 파라미터 대신 payload 객체를 그대로 넘긴다
     startWorkLog: (payload) =>
         request("/work-logs/start", {
@@ -209,9 +210,15 @@ export const api = {
         deleteWorkLog: (id) =>
             request(`/work-logs/${id}`, { method: "DELETE" }),
 
-    getWorkLogDetail: (id) => request(`/work-logs/${id}`),
-    getTimeline: (date) => request(`/work-logs/timeline?date=${date}`),
-    getUtilization: (date) => request(`/work-logs/utilization?date=${date}`),
+    // GET /api/work-logs?startDate=&endDate=
+    //   상세조회 목록 — 기간 내 모든 WorkLog(완료/진행중/정지중 다 포함)
+    getWorkLogsByRange: (startDate, endDate) =>
+        request(`/work-logs?startDate=${startDate}&endDate=${endDate}`),
+
+    // GET /api/work-logs/by-order/{workOrderId}
+    //   같은 작업지시의 세션(WorkLog) 전체를 시작순으로 — 목록 대표 카드 클릭 시 호출
+    getWorkLogsByOrder: (workOrderId) =>
+        request(`/work-logs/by-order/${workOrderId}`),
 
 
 
