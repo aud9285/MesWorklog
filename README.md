@@ -97,7 +97,7 @@ npm run dev
 
 마스터데이터 5개 + 조인 2개 + 트랜잭션 3개로 구성됩니다.
 
-<img width="1178" height="727" alt="Image" src="https://github.com/user-attachments/assets/fb245c24-cfbf-4dd3-8d29-2369c8d4c533" />
+<img width="1178" height="727" alt="Image" src="/MesWorklog/docs/mes.png" />
 
 ```
 Line(라인)    ──N:M──▶ Process(공정)     ※ 조인: LineProcess
