@@ -134,10 +134,10 @@ LineProcess, WorkerProcess는 복합키로 관리
 조업시간   = EndTime - StartTime
 계획정지   = Σ(WorkLogPause 중 category=PLANNED)     // 식사, 정기점검 등
 비가동     = Σ(WorkLogPause 중 category=UNPLANNED)   // 고장, 자재대기 등
-가동시간   = 조업시간 - 계획정지
-실가동시간 = 가동시간 - 비가동
+부하시간   = 조업시간 - 계획정지
+가동시간 = 가동시간 - 비가동
 
-가동률(%) = Σ실가동시간 / 가동시간 × 100
+가동률(%) = Σ가동시간 / 부하시간 × 100
 ```
 
 
