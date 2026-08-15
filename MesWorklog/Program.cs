@@ -2,6 +2,8 @@ using MesWorklog.Data;
 using MesWorklog.Middleware;
 using MesWorklog.Services;
 using Microsoft.EntityFrameworkCore;
+using System.Data;       
+using MySqlConnector;     
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,13 +26,17 @@ builder.Services.AddScoped<EquipmentService>();
 builder.Services.AddScoped<WorkLogService>();
 builder.Services.AddScoped<WorkOrderService>();
 builder.Services.AddScoped<PauseReasonService>();
+builder.Services.AddScoped<EffectivenessService>();
 
 
 
 var connectionString = builder.Configuration.GetConnectionString("MesDb")!;
+// AppDbContext - EFCore DbContext 하위 클래스
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString))
            .UseSnakeCaseNamingConvention());
+// MySqlConnection - dapper raw sql 실행 
+builder.Services.AddScoped<IDbConnection>(_ => new MySqlConnection(connectionString));
 
 var app = builder.Build();
 

@@ -4,15 +4,21 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace MesWorklog.Controllers
 {
+
+    // [ApiController]: Web API 전용 규약을 켜는 어트리뷰트
+    // 자동 400에러 검증, [Frombody], [FromRoute], [FromQuery] 자동 적용
     [ApiController]
     [Route("api/work-logs")]
     public class WorkLogController : ControllerBase
     {
         private readonly WorkLogService _workLogService;
+        // 생성자 파라미터로도 추가해서 DI 받아야 함
+        private readonly EffectivenessService _effectivenessService;
 
-        public WorkLogController(WorkLogService workLogService)
+        public WorkLogController(WorkLogService workLogService, EffectivenessService effectivenessService)
         {
             _workLogService = workLogService;
+            _effectivenessService = effectivenessService;
         }
 
         // 시작하기
@@ -29,7 +35,7 @@ namespace MesWorklog.Controllers
         [HttpGet("active")]
         public async Task<ActionResult<ActiveWorkLogResponse>> GetActive(
             // workerId: 조회할 작업자의 PK (쿼리스트링)
-            [FromQuery] int workerId)
+            int workerId)
         {
             var result = await _workLogService.GetActiveByWorkerAsync(workerId);
 
@@ -88,7 +94,7 @@ namespace MesWorklog.Controllers
         // GET /api/work-logs?startDate=2026-08-01&endDate=2026-08-09
         [HttpGet]
         public async Task<ActionResult<List<WorkLogListItemResponse>>> GetByDateRange(
-            [FromQuery] DateOnly startDate, [FromQuery] DateOnly endDate)
+            DateOnly startDate, DateOnly endDate)
             => Ok(await _workLogService.GetByDateRangeAsync(startDate, endDate));
 
         // 한 작업지시 작업이력 모아보기
@@ -96,5 +102,15 @@ namespace MesWorklog.Controllers
         [HttpGet("by-order/{workOrderId:int}")]
         public async Task<ActionResult<List<WorkLogDetailResponse>>> GetByWorkOrder(int workOrderId)
             => Ok(await _workLogService.GetByWorkOrderIdAsync(workOrderId));
+
+
+
+        // [HttpGet("effectiveness")] = /api/work-logs 뒤에 /effectiveness 붙는 라우트
+        // GET /api/work-logs/effectiveness?period=day&date=2026-08-15&groupBy=worker
+        // period = 기간단위, date = 날짜, groupby = 어떤 그룹의 가동율인지
+        [HttpGet("effectiveness")]
+        public async Task<ActionResult<List<EffectivenessResponse>>> GetEffectiveness(
+            string period, DateTime date, string groupBy)
+            => Ok(await _effectivenessService.GetEffectivenessAsync(period, date, groupBy)); // => 식 본문(expression-bodied member), {return ...;}를 줄인 문법
     }
 }
