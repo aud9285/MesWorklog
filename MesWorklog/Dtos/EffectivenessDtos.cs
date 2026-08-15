@@ -3,7 +3,7 @@
 
     // record는 값을 담기만 하는 타입을 짧게 쓰는 문법
     // record는 GroupKey/GroupName/OperatingMinutes/NetOperatingMinutes 프로퍼티 + 생성자 + Equals + ToString 을 전부 만들어준다.
-    public record EffectivenessResponse(int? GroupKey, string GroupName, int OperatingMinutes, int NetOperatingMinutes)
+    public record EffectivenessResponse(int? GroupKey, string GroupName, long OperatingMinutes, long NetOperatingMinutes)
     {
         // 계산 프로퍼티 생성자로 값을 안받고 4개필드로 매번 계산
         // 가동률 = Σ가동시간 / Σ부하시간 * 100

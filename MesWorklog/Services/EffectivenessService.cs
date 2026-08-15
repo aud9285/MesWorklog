@@ -170,7 +170,7 @@ namespace MesWorklog.Services
                 "INNER JOIN work_orders o ON o.id = w.work_order_id INNER JOIN processes p ON p.id = o.process_id"),
 
             "line" => ("o.line_id", "l.name",
-                "INNER JOIN work_orders o ON o.id = w.work_order_id INNER JOIN lines l ON l.id = o.line_id"),
+                "INNER JOIN work_orders o ON o.id = w.work_order_id INNER JOIN `lines` l ON l.id = o.line_id"),
 
             // equipment_id는 nullable(수작업이면 NULL)이라 INNER JOIN 쓰면 수작업 건이 통째로 빠짐 → LEFT OUTER JOIN
             // COALESCE(e.name, '수작업') — 매칭 안 돼서 e.name이 NULL이면 화면에 보여줄 라벨을 대신 채움
