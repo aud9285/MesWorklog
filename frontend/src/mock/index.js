@@ -183,34 +183,3 @@ export const workLogDetails = {
     ],
   },
 };
-
-
-/* 대시보드 가동률 — groupBy 별로 다른 목록.
- * availabilityPercent = totalNetOperatingMinutes / totalOperatingMinutes × 100 (§3-4, 분모는 조업시간이 아니라 부하시간) */
-export const efficiency = {
-  worker: [
-    { groupId: 1, groupName: '김철수', totalElapsedMinutes: 2400, totalOperatingMinutes: 2280, totalNetOperatingMinutes: 2064, availabilityPercent: 90.5 },
-    { groupId: 2, groupName: '이영희', totalElapsedMinutes: 2280, totalOperatingMinutes: 2160, totalNetOperatingMinutes: 2120, availabilityPercent: 98.1 },
-    { groupId: 3, groupName: '박민수', totalElapsedMinutes: 1980, totalOperatingMinutes: 1800, totalNetOperatingMinutes: 1465, availabilityPercent: 81.4 },
-    { groupId: 4, groupName: '정다은', totalElapsedMinutes: 2160, totalOperatingMinutes: 1900, totalNetOperatingMinutes: 1382, availabilityPercent: 72.7 },
-    { groupId: 5, groupName: '최former', totalElapsedMinutes: 900, totalOperatingMinutes: 850, totalNetOperatingMinutes: 801, availabilityPercent: 94.2 },
-    { groupId: 6, groupName: '한지우', totalElapsedMinutes: 1740, totalOperatingMinutes: 1620, totalNetOperatingMinutes: 1409, availabilityPercent: 87.0 },
-    { groupId: 7, groupName: '오세훈', totalElapsedMinutes: 1620, totalOperatingMinutes: 1450, totalNetOperatingMinutes: 1069, availabilityPercent: 73.7 },
-    { groupId: 8, groupName: '유가람', totalElapsedMinutes: 2040, totalOperatingMinutes: 1950, totalNetOperatingMinutes: 1795, availabilityPercent: 92.1 },
-  ],
-  process: [
-    { groupId: 1, groupName: '조립', totalElapsedMinutes: 6120, totalOperatingMinutes: 5800, totalNetOperatingMinutes: 5202, availabilityPercent: 89.7 },
-    { groupId: 2, groupName: '검사', totalElapsedMinutes: 4380, totalOperatingMinutes: 4000, totalNetOperatingMinutes: 3197, availabilityPercent: 79.9 },
-    { groupId: 3, groupName: '포장', totalElapsedMinutes: 3960, totalOperatingMinutes: 3800, totalNetOperatingMinutes: 3524, availabilityPercent: 92.7 },
-  ],
-  line: [
-    { groupId: 1, groupName: '1라인', totalElapsedMinutes: 8400, totalOperatingMinutes: 7800, totalNetOperatingMinutes: 6972, availabilityPercent: 89.4 },
-    { groupId: 2, groupName: '2라인', totalElapsedMinutes: 6060, totalOperatingMinutes: 5700, totalNetOperatingMinutes: 5211, availabilityPercent: 91.4 },
-  ],
-  equipment: [
-    { groupId: 1, groupName: '조립기 A', totalElapsedMinutes: 6120, totalOperatingMinutes: 5750, totalNetOperatingMinutes: 5140, availabilityPercent: 89.4 },
-    { groupId: 2, groupName: '검사기 B', totalElapsedMinutes: 4380, totalOperatingMinutes: 3900, totalNetOperatingMinutes: 3021, availabilityPercent: 77.5 },
-    { groupId: 3, groupName: '포장기 C', totalElapsedMinutes: 3960, totalOperatingMinutes: 3850, totalNetOperatingMinutes: 3603, availabilityPercent: 93.6 },
-    { groupId: 4, groupName: '(설비 없음)', totalElapsedMinutes: 1200, totalOperatingMinutes: 1140, totalNetOperatingMinutes: 1044, availabilityPercent: 91.6 },
-  ],
-};

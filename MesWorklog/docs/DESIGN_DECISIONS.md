@@ -201,7 +201,7 @@ NetOperatingMinutes = 180   → 가동률 100%  (실제로는 60분만 가동 = 
 | 영역 | 도구 | 이유 |
 |---|---|---|
 | `WorkLog` 상태전이(`Start`/`Pause`/`Resume`/`Complete`), 마스터데이터(`Line`/`Process`/`Worker`/`Equipment`) CRUD | **EF Core** | 상태 가드 + 변경 감지(ChangeTracker) 기반 자동 저장이 필요한 Rich Domain Model(§4-9 등). 단순 CRUD는 EF Core의 컨벤션 기반 처리로 보일러플레이트가 적음 |
-| `GET /api/work-logs/efficiency` 대시보드 가동률 집계 | **Dapper** | 완료 건(캐시 컬럼 SUM) + 진행중 건(`NOW()` 기반 동적 계산)을 각각 조회 후 병합하는 구조(§3-5)라, 원래 EF Core로도 `FromSqlRaw`를 섞어야 했을 가능성이 높았음. 데이터량이 큰 집계 쿼리라 실행 SQL을 직접 통제하는 편이 안전 |
+| `GET /api/work-logs/effectiveness` 대시보드 가동률 집계 | **Dapper** | 완료 건(캐시 컬럼 SUM) + 진행중 건(`NOW()` 기반 동적 계산)을 각각 조회 후 병합하는 구조(§3-5)라, 원래 EF Core로도 `FromSqlRaw`를 섞어야 했을 가능성이 높았음. 데이터량이 큰 집계 쿼리라 실행 SQL을 직접 통제하는 편이 안전 |
 
 **검토했던 대안과 기각 이유**: 전체를 Dapper로 전환하는 안도 검토했으나, 그러면 `WorkLog`의 상태 가드·`private set`·자동 저장이 전제하는 변경 감지 자체가 사라져 지금까지의 도메인 모델 설계 대부분을 다시 짜야 했다(상태전이 메서드 호출 후 바뀐 컬럼을 매번 수동 UPDATE로 동기화해야 하므로, `private set`으로 막으려던 것과 같은 종류의 동기화 누락 위험이 형태만 바뀌어 재발). 반대로 전체를 EF Core로만 유지하는 안은 대시보드 집계에서 결국 raw SQL을 섞게 될 가능성이 높아 실익이 적었다.
 
@@ -280,6 +280,14 @@ PrimeVue `DatePicker`의 `view`는 `date`/`month`/`year`뿐이라 주 단위 선
 
 `PUT /api/work-orders/{id}` 엔드포인트와 그 설계 근거(§4-16)는 폐기된 게 아니다 — 이 화면에서 호출하는 걸 뺐을 뿐 API 자체는 그대로 유효하다. 라인/공정 오선택 정정이 다시 필요해지면 §4-16 설계 그대로 다이얼로그만 다시 붙이면 된다.
 
+(**추후 정정** — 결국 어느 화면에도 연결하지 않은 채로 남아있다가, §4-19에서 완전히 제거했다.)
+
+### 4-19. 작업지시 수정 API(PUT) 최종 폐기
+
+§4-18에서 연결을 미뤄둔 뒤로 `PUT /api/work-orders/{id}`를 실제로 호출하는 화면이 끝내 하나도 생기지 않았다. 라인/공정 오선택은 §4-8에서 이미 "잘못 골라도 실제로 조용히 잘못 저장되는 범위는 좁다"고 판단했었고(라인→공정 캐스케이딩 셀렉트가 대부분 자연스럽게 막아줌), 운영 중에 이 정정 경로가 실제로 필요했던 사례도 없었다. → **`WorkOrderController`의 PUT 엔드포인트와 `WorkOrderService.UpdateAsync`를 코드에서 완전히 제거**했다.
+
+§4-16에서 세운 설계(라인/공정/목표수량 PUT 치환)와 §4-18의 "폐기 아님" 판단은 그 시점까지는 유효했던 결정이었지만, **"지금 안 쓰는 걸 미리 만들어두지 않는다"는 §4-7(`IsPrimary` 폐기)·§4-14(`WAITING` 상태 폐기)의 원칙을 여기도 그대로 적용**하기로 했다 — 쓰는 곳 없이 남아있는 코드는 유지보수 대상만 늘릴 뿐이라는 같은 이유다. 라인/공정 오선택 정정이 다시 필요해지면 §4-16 설계를 그대로 되살리면 된다(설계 자체가 잘못됐던 건 아니라서).
+
 ## 5. API 엔드포인트 (최종)
 
 | Method | Path | 설명 |
@@ -290,9 +298,8 @@ PrimeVue `DatePicker`의 `view`는 `date`/`month`/`year`뿐이라 주 단위 선
 | GET/POST/PUT/DELETE | `/api/equipment?includeInactive=` | 설비 CRUD |
 | GET | `/api/pause-reasons` | 정지사유 목록(읽기 전용) |
 | GET | `/api/work-orders/open?workerId=` | 이어하기용 미완료 작업지시 목록(`CompletedAt == null`). §4-15-①에 따라 `processId` 대신 `workerId`로 받아 그 작업자가 배정된 공정들의 작업지시를 한 번에 반환한다. 응답에 `activeWorkerCount`(현재 진행중인 인원 수) 포함 |
-| PUT | `/api/work-orders/{id}` | `{lineId,processId,targetQty}` — 라인/공정 오선택 정정(§4-9) + 목표수량 정정(§4-16). 라인-공정 조합 재검증, 목표수량을 누적실적 이하로 낮추면 자동완료(진행중/정지중 세션 있으면 409), 이미 완료된 작업지시는 수정 불가 |
 | GET | `/api/work-logs/active?workerId=` | 그 작업자의 활성(`InProgress`/`Paused`) 건 1개(없으면 빈 응답). 현장 작업 화면이 작업자 선택 직후 호출(§4-15-①). `completedQty`(그 작업지시의 누적 실적) 포함 |
-| GET | `/api/work-logs?date=` | 특정 날짜의 작업이력 목록. 완료 건은 캐시 3개 포함, 진행중/정지중 건은 `null`(§4-15-⑤) |
+| GET | `/api/work-logs?startDate=&endDate=` | 기간별 작업이력 목록(§4-17, 상세조회 대표 카드용). 완료 건은 캐시 3개 포함, 진행중/정지중 건은 `null`(§4-15-⑤) |
 | POST | `/api/work-logs/start` | `{workerId,startTime,equipmentId?,workOrderId}`(이어하기) 또는 `{workerId,startTime,equipmentId?,lineId,processId,targetQty}`(신규). `equipmentId`는 어느 경로든 이 WorkLog 세션 하나에만 적용된다(§4-16) |
 | POST | `/api/work-logs/{id}/pause` | `{pausedAt,pauseReasonId}` |
 | POST | `/api/work-logs/{id}/resume` | `{resumedAt}` |
@@ -305,19 +312,19 @@ PrimeVue `DatePicker`의 `view`는 `date`/`month`/`year`뿐이라 주 단위 선
 { "result": "deleted" }                        // 참조 이력이 없어 실제 삭제됨
 { "result": "deactivated", "historyCount": 120 }  // 이력이 있어 IsActive=false 처리됨
 ```
-| GET | `/api/work-logs/{id}` | 상세조회(계획 비교 없음) |
-| GET | `/api/work-logs/efficiency?period=day\|month\|year&date=&groupBy=worker\|process\|line\|equipment` | 대시보드 가동률. `week`는 §4-15-②에 따라 프론트에서 호출하지 않음(엔드포인트는 열어둬도 무방) |
+| GET | `/api/work-logs/by-order/{workOrderId}` | 그 작업지시의 세션(WorkLog) 전체를 시작순으로 반환(§4-17). `GET /api/work-logs/{id}`(단건 상세)를 대체함 |
+| GET | `/api/work-logs/effectiveness?period=day\|month\|year&date=&groupBy=worker\|process\|line\|equipment` | 대시보드 가동률(Dapper, §4-13). `week`는 §4-15-②에 따라 프론트에서 호출하지 않음(엔드포인트는 열어둬도 무방). `groupKey`는 설비 그룹의 수작업(설비 미배정) 항목에서 `null` 가능 |
 
 ## 6. 화면 구성 (최종 4개)
 
-**구현 상태(2026-08-10)**: 아래 4개 화면 모두 Vue 3 + PrimeVue로 UI/UX 구현 완료(목 데이터 기준, `frontend/src/`). API 연동은 진행 예정이며, 각 컴포넌트 상단 `TODO(연동)` 주석에 붙일 엔드포인트를 정리해 두었다. 아래 서술은 §4-15에서 정정된 최종 형태를 반영한다.
+**구현 상태(2026-08-15)**: 아래 4개 화면 모두 Vue 3 + PrimeVue로 UI/UX 구현 완료. `WorkerDashboard.vue`/`DetailView.vue`/`Dashboard.vue`는 mock을 걷어내고 실제 API 연동까지 끝남. `MasterData.vue`도 mock import는 이미 주석 처리된 상태(연동 여부는 화면별로 직접 확인 필요). 아래 서술은 §4-15에서 정정된 최종 형태를 반영한다.
 
 1. **현장 작업 화면**(`WorkerDashboard.vue`): **작업자 선택이 최우선**(§4-15-①) — 그 작업자의 활성 건이 있으면 진행중 카드(정지/재개/완료/이력 삭제), 없으면 시작 폼. 이어하기 체크박스(끄면 라인→공정 캐스케이딩 셀렉트로 신규 생성, 켜면 미완료 작업지시 카드에서 선택) → 시작/일시정지(사유 선택)/재개/완료(실적수량 입력). 오입력 데이터는 삭제 가능.
    - 신규 시작 입력폼은 **라인 → 공정 캐스케이딩 셀렉트**(상위 미선택 시 하위는 `disabled`), 공정 후보는 §4-8(라인-공정 조합)과 §4-7(작업자 배정) 둘 다 만족하는 것만 노출
    - 시각 입력은 10분 단위 스텝 + 현재 이후 시각 선택 차단(달력 `maxDate`)
    - 완료 버튼은 `Paused` 동안 비활성화 + "정지 중입니다. 재개 후 완료해주세요" alert(§4-9)
    - 목표/누적/잔여 수량을 진행중 카드와 완료 팝업에 표시, 실적 입력이 목표를 초과하면 경고(차단은 아님)
-2. **대시보드**(`Dashboard.vue`): 기간(일/월/연, §4-15-②) × 그룹(작업자/공정/라인/설비) 가동률 그래프. 공정·라인은 세로 막대, 작업자·설비는 가로 막대+스크롤. "작업을 시작한 날짜 기준 집계" 안내 문구 표시(§3-6). 월/연은 실제 집계 범위(예: 2026-08-01~08-31)를 별도 표시
+2. **대시보드**(`Dashboard.vue`): 기간(일/월/연, §4-15-②) × 그룹(작업자/공정/라인/설비) 가동률 그래프. 공정·라인은 세로 막대, 작업자·설비는 가로 막대+스크롤. "작업을 시작한 날짜 기준 집계" 안내 문구 표시(§3-6). 월/연은 실제 집계 범위(예: 2026-08-01~08-31)를 별도 표시. `GET /api/work-logs/effectiveness`(§4-13, Dapper) 연동 완료 — 요약 지표는 "총 조업시간"이 아니라 "총 부하시간"으로 표시한다(서버가 그룹 집계 단계에서 조업시간을 따로 안 내려줌)
 3. **상세조회 화면**(`DetailView.vue`): **기간(시작~종료) 선택 → 작업지시 단위 대표 카드 목록 → 선택 → 상세**(§4-15-⑤·§4-17). 상세는 작업지시 헤더(지시#, 라인·공정, 목표수량 대비 누적실적) 1개 + 세션(WorkLog) 카드 N개(이력#, 시간분해, 정지이력)로 구성 — 세션이 1건이면 카드도 1장, 여럿이면 그만큼 나열된다. 완료 건만 시간 분해(조업/부하/가동 누적 막대 + 계산식)와 가동률 표시, 진행중/정지중 건은 경과 시간만. 작업지시 수정 다이얼로그는 일단 빼고, 세션 카드마다 삭제 버튼을 붙였다(§4-18) — `DELETE /api/work-logs/{id}`, `WorkerDashboard.vue`와 같은 삭제 확인 팝업(`ConfirmDeleteDialog`) 재사용
 4. **마스터데이터 관리 화면**(`MasterData.vue`): `[라인|공정|작업자|설비]` 탭, DataTable + Dialog CRUD
    - 공정 탭은 소속 라인을, 작업자 탭은 소속 공정을 **멀티셀렉트**로 편집(N:M). 저장 시 diff 동기화(§4-11). 조인 해제 시 정적 경고 표시(§4-15-④)

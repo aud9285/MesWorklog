@@ -125,16 +125,3 @@ h1, h2, h3, h4 {
 
 /* 숫자 정렬용 — 시간/수량이 자릿수 때문에 흔들리지 않게 */
 .num { font-variant-numeric: tabular-nums; }
-
-/* 연동 전 임시 데이터임을 알리는 배너 */
-.mock-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-radius: 8px;
-  background: #fff6e5;
-  border: 1px solid #f3d9a4;
-  color: #8a6320;
-  font-size: 12.5px;
-}

@@ -13,6 +13,23 @@ export function mmddhhmm(iso) {
   return `${s.slice(5, 10)} ${s.slice(11, 16)}`;
 }
 
+/** "2026-08-09T09:00:00" → "08-09(일)"
+ *  new Date(문자열) 대신 연/월/일을 쪼개 로컬 Date 로 만드는 이유:
+ *  new Date('2026-08-09') 는 UTC 자정으로 해석돼 시간대에 따라 요일이 하루 밀린다. */
+export function mmddDow(iso) {
+  if (!iso) return '-';
+  const s = String(iso);
+  const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+  const dow = ['일', '월', '화', '수', '목', '금', '토'][new Date(y, m - 1, d).getDay()];
+  return `${s.slice(5, 10)}(${dow})`;
+}
+
+/** 두 시각이 서로 다른 날짜인지 — 자정을 넘긴 야간 작업을 표시할 때 쓴다 */
+export function isNextDay(fromIso, toIso) {
+  if (!fromIso || !toIso) return false;
+  return String(fromIso).slice(0, 10) !== String(toIso).slice(0, 10);
+}
+
 /** 분 → "9시간 0분" (0이면 "0분") */
 export function duration(minutes) {
   if (minutes == null) return '-';

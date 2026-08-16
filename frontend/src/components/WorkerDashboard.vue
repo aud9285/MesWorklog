@@ -196,9 +196,25 @@ watch(workerId, async () => {
   loading.value = false;
 });
 
+/* 라인 후보 = 이 작업자가 배정된 공정이 하나라도 속한 라인만.
+ * 라인 값 자체는 여전히 자유 입력(파생하지 않음, §4-8)이지만,
+ * 이 작업자가 애초에 고를 수 없는 라인을 목록에서 미리 뺀다 —
+ * "라인 고르고 → 공정 없음 안내 보고 → 다른 라인 재시도"라는 시행착오를 없앤다. */
+const lineOptions = computed(() => {
+  if (!selectedWorker.value) return lines.value;
+  const myLineIds = new Set(
+    allProcesses.value
+      .filter((p) => p.isActive && selectedWorker.value.processIds.includes(p.id))
+      .flatMap((p) => p.lineIds),
+  );
+  return lines.value.filter((l) => myLineIds.has(l.id));
+});
+
 /* 공정 후보 = 선택한 라인에 속하면서(§4-8) + 이 작업자가 배정된 공정(§4-7)
  * 두 조건을 모두 만족해야 한다. 배정되지 않은 공정으로 시작하면
- * "누가 어느 공정에서 일하는가"라는 마스터데이터와 실적이 어긋난다. */
+ * "누가 어느 공정에서 일하는가"라는 마스터데이터와 실적이 어긋난다.
+ * (라인 자체도 이제 위 lineOptions로 미리 좁혀지므로, 여기 도달했다는 건
+ *  최소 하나의 공정은 있다는 뜻이지만 방어적으로 필터는 유지한다) */
 const processOptions = computed(() => {
   if (!lineId.value || !selectedWorker.value) return [];
   return allProcesses.value.filter(
@@ -472,9 +488,11 @@ async function confirmDelete() {
         <div v-if="!continueMode" class="row wrap g-3">
           <div class="field">
             <label>라인</label>
-            <Select v-model="lineId" :options="lines" optionLabel="name" optionValue="id"
+            <!-- 이 작업자가 배정된 공정이 있는 라인만 노출(위 lineOptions) —
+                 무관한 라인을 골라 "공정 없음" 안내를 보는 시행착오를 없앤다 -->
+            <Select v-model="lineId" :options="lineOptions" optionLabel="name" optionValue="id"
                     placeholder="라인 선택" @change="onLineChange"
-                    emptyMessage="등록된 라인이 없습니다." />
+                    emptyMessage="이 작업자가 배정된 라인이 없습니다." />
           </div>
 
           <!-- 라인을 먼저 고르지 않으면 공정을 못 고른다 → 잘못된 조합 자체가 선택 불가 (§4-8)
@@ -491,12 +509,6 @@ async function confirmDelete() {
             <InputNumber v-model="targetQty" :min="1" showButtons />
           </div>
         </div>
-
-        <!-- 라인은 골랐는데 배정된 공정이 없는 경우 — 정상 상태이므로 에러가 아닌 안내 -->
-        <p v-if="!continueMode && lineId && !processOptions.length" class="hint mt-2">
-          {{ selectedWorker?.name }} 님이 이 라인에서 맡은 공정이 없습니다.
-          관리자에게 공정 배정을 요청해 주세요.
-        </p>
 
         <!-- ── 이어하기 ON: 미완료 작업지시 목록 ── -->
         <div v-if="continueMode" class="col g-3">

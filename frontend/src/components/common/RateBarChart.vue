@@ -14,7 +14,8 @@ import { computed } from 'vue';
 import { duration, rateColor } from '../../utils/format.js';
 
 const props = defineProps({
-  /** [{ groupId, groupName, availabilityPercent, totalElapsedMinutes, totalNetOperatingMinutes }] */
+  /** [{ groupKey, groupName, ratePercent, operatingMinutes, netOperatingMinutes }]
+   *  groupKey는 설비 그룹의 "수작업" 항목일 때 null일 수 있어 :key로는 안 쓴다(groupName은 항상 유일) */
   items: { type: Array, default: () => [] },
   orientation: { type: String, default: 'vertical' },
 });
@@ -30,38 +31,40 @@ const isVertical = computed(() => props.orientation === 'vertical');
 
   <!-- 세로 막대: 공정 / 라인 -->
   <div v-else-if="isVertical" class="v-chart">
-    <div v-for="item in items" :key="item.groupId" class="v-item">
-      <span class="v-value num">{{ item.availabilityPercent.toFixed(1) }}%</span>
+    <div v-for="item in items" :key="item.groupName" class="v-item">
+      <span class="v-value num">{{ item.ratePercent.toFixed(1) }}%</span>
       <div class="v-track">
         <!-- 높이를 가동률(%)에 그대로 매핑. 색은 구간별로 달라진다 -->
         <div
           class="v-fill"
           :style="{
-            height: item.availabilityPercent + '%',
-            background: rateColor(item.availabilityPercent),
+            height: item.ratePercent + '%',
+            background: rateColor(item.ratePercent),
           }"
         />
       </div>
       <span class="v-label">{{ item.groupName }}</span>
-      <span class="v-sub num">{{ duration(item.totalElapsedMinutes) }}</span>
+      <!-- 부하시간 — 가동률의 분모(§3-4). 조업시간은 서버가 안 내려줌 -->
+      <span class="v-sub num">{{ duration(item.operatingMinutes) }}</span>
     </div>
   </div>
 
   <!-- 가로 막대 + 스크롤: 작업자 / 설비 -->
   <div v-else class="h-chart">
-    <div v-for="item in items" :key="item.groupId" class="h-item">
+    <div v-for="item in items" :key="item.groupName" class="h-item">
       <span class="h-label" :title="item.groupName">{{ item.groupName }}</span>
       <div class="h-track">
         <div
           class="h-fill"
           :style="{
-            width: item.availabilityPercent + '%',
-            background: rateColor(item.availabilityPercent),
+            width: item.ratePercent + '%',
+            background: rateColor(item.ratePercent),
           }"
         />
       </div>
-      <span class="h-value num">{{ item.availabilityPercent.toFixed(1) }}%</span>
-      <span class="h-sub num">{{ duration(item.totalNetOperatingMinutes) }} / {{ duration(item.totalElapsedMinutes) }}</span>
+      <span class="h-value num">{{ item.ratePercent.toFixed(1) }}%</span>
+      <!-- 가동시간 / 부하시간 — 가동률(%) 계산식의 분자/분모를 그대로 보여준다(§3-4) -->
+      <span class="h-sub num">{{ duration(item.netOperatingMinutes) }} / {{ duration(item.operatingMinutes) }}</span>
     </div>
   </div>
 </template>

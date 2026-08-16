@@ -127,11 +127,30 @@ onMounted(() => {
   TABS.forEach(loadTab);
 });
 
-/* 멀티셀렉트의 선택지 — 공정 탭은 라인 목록, 작업자 탭은 공정 목록이 필요하다 */
+/* 마운트 시 4개 탭을 한꺼번에 불러오는 이유(위 주석)가 그대로 여기에도 적용된다 —
+ * 라인/공정/작업자가 서로의 joinIds를 스냅샷으로 들고 있어서,
+ * 현재 탭만 새로고침하면 다른 탭은 삭제/변경된 id를 계속 들고 있게 된다.
+ * 예: 공정 탭에서 1공정을 삭제해도 작업자 탭의 rows.value.worker는 그대로라
+ *     그 작업자를 수정 팝업으로 열면 이미 없는 공정 id가 MultiSelect 옵션에는
+ *     없는데 선택값에는 남아, 이름 없는 빈 칩("흔적")으로 보인다.
+ * 그래서 저장/삭제/복구 뒤에는 항상 4개 탭을 전부 다시 불러온다. */
+async function loadAllTabs() {
+  await Promise.all(TABS.map(loadTab));
+}
+
+/* 멀티셀렉트의 선택지 — 공정 탭은 라인 목록, 작업자 탭은 공정 목록이 필요하다.
+ * 기본은 활성 항목만 노출하되(새로 고를 수 있는 건 활성뿐이어야 하므로),
+ * 지금 폼에 이미 선택돼 있는 비활성 항목은 예외로 포함시킨다 — 안 그러면
+ * "선택값엔 있는데 옵션 목록엔 없는 id"가 생겨 이름 없는 빈 칩으로 남는다
+ * (실적이 있어 삭제 대신 비활성화된 경우, 조인 자체는 그대로 남아있어서 발생, §4-12).
+ * 비활성 항목은 이름 뒤에 "(비활성)"을 붙여 구분하고, optionDisabled로 새로
+ * 고르지는 못하게 막는다 — 해제(칩 제거)는 계속 가능하다. */
 const joinOptions = computed(() => {
-  if (activeTab.value === 'process') return rows.value.line.filter((l) => l.isActive);
-  if (activeTab.value === 'worker') return rows.value.process.filter((p) => p.isActive);
-  return [];
+  const sourceKey = { process: 'line', worker: 'process' }[activeTab.value];
+  if (!sourceKey) return [];
+  return rows.value[sourceKey]
+    .filter((s) => s.isActive || form.value.joinIds.includes(s.id))
+    .map((s) => (s.isActive ? s : { ...s, name: `${s.name} (비활성)` }));
 });
 
 /* 비활성 포함 여부 — 기본은 숨김, 체크하면 전부 보인다 (§4-12) */
@@ -230,8 +249,8 @@ async function save() {
       // 등록 api 호출
       await currentTab.value.create(form.value);
     }
-    // 수정/등록 후 목록 다시 불러오기
-    await loadTab(currentTab.value);
+    // 수정/등록 후 목록 다시 불러오기 — 다른 탭의 joinIds 스냅샷도 같이 갱신해야 한다
+    await loadAllTabs();
     toast.add({ severity: 'success', summary: `'${form.value.name}'을(를) 저장했습니다.`, life: 2500 });
     // 다이얼로그 닫기
     editDialog.value = false;
@@ -257,8 +276,8 @@ async function confirmDelete() {
     // 삭제 api 호출
     const result = await currentTab.value.remove(deleting.value.id);
 
-    // 삭제 후 목록 다시 불로오기
-    await loadTab(currentTab.value);
+    // 삭제 후 목록 다시 불러오기 — 다른 탭의 joinIds 스냅샷도 같이 갱신해야 한다
+    await loadAllTabs();
 
     // 응답에 result 값이 물리적 삭제인지 논리적 삭제인지
     const hasHistory = result.result === 'deactivated';
@@ -298,8 +317,8 @@ async function reactivate(row) {
       // join이 없는 탭이면 빈배열
       joinIds: join ? [...(row[join.field] ?? [])] : [],
     });
-    // 목록 다시불러오기
-    await loadTab(currentTab.value);
+    // 목록 다시 불러오기 — 다른 탭의 joinIds 스냅샷도 같이 갱신해야 한다
+    await loadAllTabs();
     toast.add({ severity: 'success', summary: `'${row.name}'을(를) 다시 사용할 수 있습니다.`, life: 2500 });
   } catch (err) {
     toast.add({ severity: 'error', summary: '처리하지 못했습니다.', detail: err.message, life: 4000 });
@@ -403,8 +422,10 @@ async function reactivate(row) {
           <label>{{ currentTab.join.label }}</label>
           <!-- maxSelectedLabels: 이 개수를 넘으면 칩 대신 "N개 선택됨"으로 뭉쳐서 보여줌.
                라인/공정 마스터가 몇십 개 수준이라 넉넉히 잡아 사실상 항상 칩으로 보이게 함 -->
+          <!-- optionDisabled: 비활성 항목(이미 선택돼 있던 것만 목록에 남음, 위 joinOptions 참고)은
+               새로 고르지 못하게 막는다. 이미 선택된 칩은 x로 계속 해제할 수 있다 -->
           <MultiSelect v-model="form.joinIds" :options="joinOptions"
-                       optionLabel="name" optionValue="id"
+                       optionLabel="name" optionValue="id" :optionDisabled="(o) => !o.isActive"
                        display="chip" filter :maxSelectedLabels="20"
                        selectedItemsLabel="{0}개 선택됨"
                        placeholder="선택 안 함" fluid
@@ -421,8 +442,7 @@ async function reactivate(row) {
           <div class="col g-1">
             <strong>{{ removedJoinNames.join(', ') }} 연결이 해제됩니다</strong>
             <span>
-              지난 작업 기록은 그대로 남지만, 해제한 뒤에는 이 조합으로 새 작업을 시작할 수 없습니다.
-              기존 작업의 라인 · 공정을 수정할 때도 선택하지 못하게 됩니다.
+              지난 작업 기록은 그대로 남지만, 해제한 뒤에는 이 공정으로 작업을 시작할 수 없습니다.
             </span>
           </div>
         </div>

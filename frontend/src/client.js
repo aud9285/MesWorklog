@@ -220,6 +220,11 @@ export const api = {
     getWorkLogsByOrder: (workOrderId) =>
         request(`/work-logs/by-order/${workOrderId}`),
 
-
+    // GET /api/work-logs/effectiveness?period=&date=&groupBy=
+    //   대시보드 가동률 집계. period: day|month|year, date: yyyy-MM-dd, groupBy: worker|process|line|equipment
+    //   → [{ groupKey, groupName, operatingMinutes, netOperatingMinutes, ratePercent }]
+    //   groupKey는 설비 그룹에서 수작업(설비 없음) 항목일 때 null일 수 있다
+    getEffectiveness: (period, date, groupBy) =>
+        request(`/work-logs/effectiveness?period=${period}&date=${date}&groupBy=${groupBy}`),
 
 };

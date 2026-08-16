@@ -175,7 +175,7 @@ namespace MesWorklog.Services
             // equipment_id는 nullable(수작업이면 NULL)이라 INNER JOIN 쓰면 수작업 건이 통째로 빠짐 → LEFT OUTER JOIN
             // COALESCE(e.name, '수작업') — 매칭 안 돼서 e.name이 NULL이면 화면에 보여줄 라벨을 대신 채움
             "equipment" => ("w.equipment_id", "COALESCE(e.name, '수작업')",
-                "LEFT JOIN equipments e ON e.id = w.equipment_id"),
+                "LEFT OUTER JOIN equipments e ON e.id = w.equipment_id"),
 
             _ => throw new BusinessRuleException($"알 수 없는 그룹 기준입니다: {groupBy}")
         };

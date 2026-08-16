@@ -70,12 +70,13 @@ import SelectButton from 'primevue/selectbutton';
 import Card from 'primevue/card';
 import Tag from 'primevue/tag';
 import Button from 'primevue/button';
+import InputText from 'primevue/inputtext';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import ConfirmDeleteDialog from './common/ConfirmDeleteDialog.vue';
 
 import {
-  hhmm, mmddhhmm, ymd, duration, minutesBetween, rateColor,
+  hhmm, mmddhhmm, mmddDow, isNextDay, ymd, duration, minutesBetween, rateColor,
   STATUS_LABEL, STATUS_SEVERITY, CATEGORY_LABEL,
 } from '../utils/format.js';
 
@@ -145,6 +146,28 @@ function rateOf(log) {
   return (log.netOperatingMinutes / log.operatingMinutes) * 100;
 }
 
+/* 기간을 넓게 잡으면(예: 3개월) 대표 카드가 수백 건으로 늘어나 카드 그리드로는
+ * 훑어보기 어려워진다 — 그래서 표(DataTable) + 페이지네이션 + 정렬 + 검색으로 바꿨다.
+ * 검색은 서버 재조회 없이 이미 받아온 대표 목록 안에서만 거른다(작업자/라인/공정명) */
+const searchQuery = ref('');
+const searchedLogs = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  const base = q
+    ? representativeLogs.value.filter((l) =>
+        [l.workerName, l.lineName, l.processName].some((f) => f?.toLowerCase().includes(q)))
+    : representativeLogs.value;
+
+  /* 정렬용 파생 필드를 미리 붙여둔다 — DataTable의 sortField는 "필드 이름 문자열"만
+   * 받고 함수는 못 받으므로, 계산값인 가동률과 "라인 · 공정" 합친 문자열은
+   * 여기서 실제 속성으로 만들어 둬야 헤더 클릭 정렬이 동작한다.
+   * 미완료 건은 가동률이 없어(null) 정렬 시 -1로 내려보낸다 */
+  return base.map((l) => ({
+    ...l,
+    _rate: rateOf(l) ?? -1,
+    _lineProcess: `${l.lineName} · ${l.processName}`,
+  }));
+});
+
 /* ── 선택 / 상세 ────────────────────────────────────────── */
 /* WorkLog 가 아니라 WorkOrder 를 선택 단위로 삼는다 — 클릭 한 번으로
  * 그 작업지시에 딸린 세션을 전부 보여주는 게 목표라서다 */
@@ -174,9 +197,22 @@ async function fetchSiblingLogs(workOrderId) {
   }
 }
 
-function selectOrder(workOrderId) {
+async function selectOrder(workOrderId) {
   selectedWorkOrderId.value = workOrderId;
-  fetchSiblingLogs(workOrderId);
+  await fetchSiblingLogs(workOrderId);
+
+  // 형제 세션이 하나도 안 왔다면 — 방금 삭제됐거나, DB가 리셋됐거나 등으로
+  // 목록 카드가 이미 없어진 작업지시를 가리키고 있었다는 뜻. 안내만 하고 끝내면
+  // 카드가 계속 목록에 남아 계속 같은 일이 반복되니, 목록도 같이 새로고침한다.
+  if (!siblingLogs.value.length) {
+    toast.add({
+      severity: 'warn', summary: '이 작업지시를 찾을 수 없습니다.',
+      detail: '방금 삭제됐거나 목록이 오래된 상태일 수 있어요. 목록을 다시 불러옵니다.',
+      life: 4000,
+    });
+    selectedWorkOrderId.value = null;
+    await fetchLogs();
+  }
 }
 
 /* 작업지시 헤더에 쓸 요약 — 라인/공정/목표수량은 형제끼리 항상 같은 값이라
@@ -305,40 +341,77 @@ async function confirmDeleteLog() {
       </template>
     </Card>
 
-    <!-- ══ 2. 목록 (작업지시 대표 카드) ═══════════════════ -->
+    <!-- ══ 2. 목록 (작업지시 대표 건) ═══════════════════════
+         기간을 넓게 잡으면 수백 건까지 늘어날 수 있어 카드 그리드 대신
+         표 + 페이지네이션 + 정렬 + 검색으로 훑어보기 쉽게 만든다 -->
     <div v-if="!representativeLogs.length" class="empty">
       선택한 기간에 작업 이력이 없습니다.
     </div>
 
-    <div v-else class="log-list">
-      <button
-        v-for="log in representativeLogs" :key="log.workOrderId"
-        class="log-card" :class="{ picked: selectedWorkOrderId === log.workOrderId }"
-        @click="selectOrder(log.workOrderId)"
-      >
-        <div class="row between g-2">
-          <strong>{{ log.workerName }}</strong>
-          <Tag :value="STATUS_LABEL[log.status]" :severity="STATUS_SEVERITY[log.status]" />
+    <Card v-else>
+      <template #content>
+        <div class="row between wrap g-3 mb-3">
+          <span class="hint">{{ searchedLogs.length }} / {{ representativeLogs.length }}건</span>
+          <span class="p-input-icon-left search-box">
+            <i class="pi pi-search" />
+            <InputText v-model="searchQuery" placeholder="작업자 · 라인 · 공정 검색" size="small" />
+          </span>
         </div>
 
-        <div class="log-meta">{{ log.lineName }} · {{ log.processName }}</div>
+        <DataTable
+          :value="searchedLogs" dataKey="workOrderId" size="small" stripedRows
+          paginator :rows="15" :rowsPerPageOptions="[15, 30, 50]"
+          sortField="startTime" :sortOrder="-1"
+          :rowClass="(log) => ({ 'row-picked': log.workOrderId === selectedWorkOrderId })"
+          selectionMode="single" @row-click="({ data }) => selectOrder(data.workOrderId)"
+        >
+          <!-- 날짜는 시작 시각 기준 — 자정을 넘긴 야간 작업도 개시일에 묶인다 (§3-6) -->
+          <Column header="날짜" sortable field="startTime" style="width: 110px">
+            <template #body="{ data }">
+              <span class="num">{{ mmddDow(data.startTime) }}</span>
+            </template>
+          </Column>
 
-        <div class="row between g-2">
-          <span class="log-time num">
-            {{ hhmm(log.startTime) }} ~ {{ log.endTime ? hhmm(log.endTime) : '진행 중' }}
-          </span>
+          <Column field="workerName" header="작업자" sortable style="width: 100px" />
+
+          <Column header="라인 · 공정" sortable field="_lineProcess">
+            <template #body="{ data }">{{ data.lineName }} · {{ data.processName }}</template>
+          </Column>
+
+          <Column header="상태" style="width: 90px">
+            <template #body="{ data }">
+              <Tag :value="STATUS_LABEL[data.status]" :severity="STATUS_SEVERITY[data.status]" />
+            </template>
+          </Column>
+
+          <Column header="시작 ~ 종료" style="width: 150px">
+            <template #body="{ data }">
+              <span class="num">
+                {{ hhmm(data.startTime) }} ~ {{ data.endTime ? hhmm(data.endTime) : '진행 중' }}
+                <!-- 종료가 다음 날이면 표시 — "20:00 ~ 08:00"이 같은 날처럼 읽히는 걸 막는다 -->
+                <sup v-if="isNextDay(data.startTime, data.endTime)" class="next-day">+1</sup>
+              </span>
+            </template>
+          </Column>
+
           <!-- 완료 건만 가동률을 계산할 수 있다 (캐시 컬럼이 그때 채워지므로) -->
-          <span v-if="rateOf(log) !== null" class="log-rate num"
-                :style="{ color: rateColor(rateOf(log)) }">
-            {{ rateOf(log).toFixed(1) }}%
-          </span>
-          <span v-else class="log-rate pending">—</span>
-        </div>
+          <Column header="가동률" sortable field="_rate" style="width: 90px">
+            <template #body="{ data }">
+              <span v-if="rateOf(data) !== null" class="num" :style="{ color: rateColor(rateOf(data)) }">
+                {{ rateOf(data).toFixed(1) }}%
+              </span>
+              <span v-else class="hint">—</span>
+            </template>
+          </Column>
 
-        <!-- 화면 구석 — 이 이력이 어느 작업지시 소속인지 항상 보이게 -->
-        <div class="log-id num">지시#{{ log.workOrderId }} · 이력#{{ log.id }}</div>
-      </button>
-    </div>
+          <Column header="지시# · 이력#" style="width: 120px">
+            <template #body="{ data }">
+              <span class="num hint">#{{ data.workOrderId }} · #{{ data.id }}</span>
+            </template>
+          </Column>
+        </DataTable>
+      </template>
+    </Card>
 
     <!-- ══ 3. 상세 ══════════════════════════════════════ -->
     <div v-if="!selectedWorkOrderId" class="empty">
@@ -511,45 +584,35 @@ async function confirmDeleteLog() {
 /* range 모드는 "yyyy-mm-dd - yyyy-mm-dd" 두 날짜를 한 입력칸에 표시해 기본 폭으로는 잘린다 */
 .range-picker :deep(input) { width: 250px; }
 
-/* ── 목록 카드 ── */
-.log-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(226px, 1fr));
-  gap: 10px;
-}
-
-.log-card {
+/* ── 목록 표 ── */
+.search-box {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 12px 14px 26px;
-  border: 1.5px solid var(--surface-border);
-  border-radius: 10px;
-  background: var(--surface-card);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  color: inherit;
-  transition: border-color 0.15s, background 0.15s;
+  display: inline-flex;
+  align-items: center;
 }
-.log-card:hover { border-color: #c3ccdb; }
-.log-card.picked {
-  border-color: var(--brand);
-  background: #f2f6ff;
-}
-
-.log-meta { font-size: 12.5px; color: var(--text-muted); }
-.log-time { font-size: 12.5px; color: var(--text-normal); }
-.log-rate { font-size: 15px; font-weight: 700; }
-.log-rate.pending { color: var(--text-muted); font-weight: 500; }
-
-.log-id {
+.search-box .pi-search {
   position: absolute;
-  bottom: 8px; right: 12px;
-  font-size: 10.5px;
+  left: 10px;
+  font-size: 12px;
   color: var(--text-muted);
+  pointer-events: none;
 }
+.search-box :deep(input) { padding-left: 28px; width: 220px; }
+
+/* 자정을 넘긴 종료 시각 표시 */
+.next-day {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-left: 1px;
+}
+
+/* 선택된 행 — 카드형일 때의 .picked와 같은 강조를 표 행에 적용 */
+:deep(.row-picked) {
+  background: #f2f6ff !important;
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+:deep(.p-datatable-tbody > tr) { cursor: pointer; }
 
 /* 미완료 건수 경고 */
 .open-warn {

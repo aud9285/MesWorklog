@@ -6,7 +6,7 @@
  *
  * 【UI 구성】
  *  1) 필터 바 — 기간(일/주/월/연) · 기준 날짜 · 그룹(작업자/공정/라인/설비)
- *  2) 요약 지표 — 전체 가동률, 조업시간 합, 가동시간 합, 집계 대상 수
+ *  2) 요약 지표 — 전체 가동률, 부하시간 합, 가동시간 합, 집계 대상 수
  *  3) 차트 — 그룹에 따라 막대 방향이 달라진다
  *       · 공정 / 라인   : 항목이 적어 세로 막대
  *       · 작업자 / 설비 : 항목이 많아 가로 막대 + 스크롤
@@ -22,22 +22,26 @@
  *  → 화면의 "전체 가동률"도 Σ가동 / Σ부하시간(조업시간 아님, 계획정지 제외된 값)으로 계산해야 서버와 값이 맞는다.
  *
  * ────────────────────────────────────────────────────────────────
- * TODO(연동) — 이 화면이 사용할 API
- *   GET /api/work-logs/efficiency?period={day|month|year}&date={yyyy-MM-dd}&groupBy={worker|process|line|equipment}
- *       ※ 설계 §5 는 week 도 포함하지만 화면에서 폐기했다 (아래 periods 주석 참고).
- *         서버가 week 를 받아도 무방하나 호출하는 쪽이 없다.
+ * 【연동 완료】 GET /api/work-logs/effectiveness?period={day|month|year}&date={yyyy-MM-dd}&groupBy={worker|process|line|equipment}
+ *   ※ 설계 §5 는 week 도 포함하지만 화면에서 폐기했다 (아래 periods 주석 참고).
+ *     서버가 week 를 받아도 무방하나 호출하는 쪽이 없다.
  *
- *   응답: [{ groupId, groupName, totalElapsedMinutes, totalOperatingMinutes, totalNetOperatingMinutes, availabilityPercent }]
- *       availabilityPercent = Σ가동 / Σ부하시간 × 100 (조업시간이 아니라 부하시간이 분모, §3-4)
+ *   응답: [{ groupKey, groupName, operatingMinutes, netOperatingMinutes, ratePercent }]
+ *     ratePercent = Σ가동 / Σ부하시간 × 100 (조업시간이 아니라 부하시간이 분모, §3-4)
+ *     조업시간(elapsed)은 서버가 그룹 집계 단계에서 따로 내려주지 않아 화면에서도 안 쓴다 —
+ *     완료건은 캐시 컬럼 SUM, 진행중건은 NOW() 기준 동적계산(Dapper)을 병합한 결과다
+ *     groupKey는 설비 그룹의 "수작업"(설비 미배정) 항목일 때 null일 수 있다
  *
- *   period / date / groupBy 셋 중 하나라도 바뀌면 다시 조회하면 된다 →
- *     watch([period, baseDate, groupBy], fetchEfficiency, { immediate: true })
+ *   period / date / groupBy 셋 중 하나라도 바뀌면 다시 조회한다 →
+ *     watch([period, baseDate, groupBy], fetchEffectiveness, { immediate: true })
  *
  *   비활성(IsActive=false) 마스터도 집계에 포함된다. 퇴사자·폐기 설비의 과거 실적이
  *   사라지면 안 되기 때문이라 프론트에서 따로 거르지 않는다 (§4-12)
  * ════════════════════════════════════════════════════════════════ */
 
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
+import { useToast } from 'primevue/usetoast';
+import { api } from '../client.js';
 
 /* ── 사용하는 PrimeVue 위젯 ──────────────────────────────────
  * SelectButton : 버튼 묶음형 라디오. 선택지가 적고 항상 보여야 할 때 드롭다운보다 낫다
@@ -55,8 +59,9 @@ import Card from 'primevue/card';
 import Button from 'primevue/button';
 
 import RateBarChart from './common/RateBarChart.vue';
-import { duration, periodRangeLabel } from '../utils/format.js';
-import * as mock from '../mock/index.js';
+import { duration, periodRangeLabel, ymd } from '../utils/format.js';
+
+const toast = useToast();
 
 /* ── 필터 상태 ──────────────────────────────────────────── */
 /* 주 단위는 폐기했다.
@@ -114,19 +119,31 @@ const orientation = computed(() =>
 );
 
 /* ── 집계 결과 ──────────────────────────────────────────
- * TODO(연동) 위 TODO 블록의 efficiency API 응답으로 교체.
- *   지금은 groupBy 에 맞는 목 데이터를 골라 보여준다 */
-const rows = computed(() => mock.efficiency[groupBy.value] ?? []);
+ * period/baseDate/groupBy 중 하나라도 바뀌면 다시 조회한다(아래 watch) */
+const rows = ref([]);
+
+async function fetchEffectiveness() {
+  try {
+    rows.value = await api.getEffectiveness(period.value, ymd(baseDate.value), groupBy.value);
+  } catch (err) {
+    rows.value = [];
+    toast.add({
+      severity: 'error', summary: '가동률을 불러오지 못했습니다.',
+      detail: err.message, life: 4000,
+    });
+  }
+}
+
+watch([period, baseDate, groupBy], fetchEffectiveness, { immediate: true });
 
 /* 요약 지표 — 개별 비율의 평균이 아니라 합계끼리 나눈다 (§3-4)
- * percent의 분모는 elapsed(조업)가 아니라 operating(가동) — 계획정지는 가동 대상이 아니었던
- * 시간이라 분모에서 빠진다. elapsed는 "총 조업시간" 요약 지표를 보여주는 데만 쓴다 */
+ * percent의 분모는 operating(부하) — 계획정지는 가동 대상이 아니었던 시간이라 분모에서 빠진다.
+ * 조업시간(elapsed)은 그룹 집계 API가 안 내려줘서 요약 지표에서도 뺐다(위 헤더 주석 참고) */
 const totals = computed(() => {
-  const elapsed = rows.value.reduce((s, r) => s + r.totalElapsedMinutes, 0);
-  const operating = rows.value.reduce((s, r) => s + r.totalOperatingMinutes, 0);
-  const net = rows.value.reduce((s, r) => s + r.totalNetOperatingMinutes, 0);
+  const operating = rows.value.reduce((s, r) => s + r.operatingMinutes, 0);
+  const net = rows.value.reduce((s, r) => s + r.netOperatingMinutes, 0);
   return {
-    elapsed,
+    operating,
     net,
     percent: operating === 0 ? 0 : (net / operating) * 100,
     count: rows.value.length,
@@ -140,11 +157,6 @@ const groupLabel = computed(
 
 <template>
   <div class="col g-4">
-    <div class="mock-banner">
-      <i class="pi pi-info-circle" />
-      <span>화면 확인용 임시 데이터입니다. API 연동 시 <code>src/mock</code> 을 제거하세요.</span>
-    </div>
-
     <!-- ══ 1. 필터 바 ═══════════════════════════════════ -->
     <Card>
       <template #content>
@@ -198,8 +210,8 @@ const groupLabel = computed(
         <div class="v">{{ totals.percent.toFixed(1) }}<small>%</small></div>
       </div>
       <div class="metric">
-        <div class="k">총 조업시간</div>
-        <div class="v">{{ duration(totals.elapsed) }}</div>
+        <div class="k">총 부하시간</div>
+        <div class="v">{{ duration(totals.operating) }}</div>
       </div>
       <div class="metric">
         <div class="k">총 가동시간</div>
