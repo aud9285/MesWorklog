@@ -24,13 +24,16 @@ DB : MySQL
 dotnet test
 ```
 
-`WorkLog`의 상태 전이 가드와 OEE 시간 분해를 검증하는 단위테스트 11건이 있습니다.
+`WorkLog`의 상태 전이 가드와 OEE 시간 분해를 검증하는 단위테스트 13건이 있습니다.
 DB나 웹 서버 없이 실행되며, 아래 항목들을 고정합니다.
 
 - 정지 중에는 완료 불가 — 가동률이 100%로 부풀려지던 버그 방지
 - 연속 정지 불가 — 열린 정지가 여러 개 생겨 시간 계산이 커지던 문제 방지
 - 모든 시각 입력의 미래 시각 거부
-- 계획정지/비가동이 각각 차감되는지 (조업 180분 → 가동 150분 → 실가동 130분)
+- 계획정지/비가동이 각각 차감되는지 (조업 180분 → 부하 150분 → 가동 130분)
+- **정지·종료 시각이 직전 재개 시각과 "같은" 경우 허용** — "식사 끝나자마자 곧바로 설비고장", "고장 고치고 재개하자마자 퇴근" 같은 정상 시나리오가 막히던 버그의 회귀 방지
+
+DB 없이 시간 경계값을 검증할 수 있는 건 모든 상태 전이 메서드가 기준시각(`now`)을 파라미터로 주입받도록 설계했기 때문입니다. 같은 경계를 브라우저로 확인하려면 실제 시계가 10분 단위 경계를 넘길 때까지 기다려야 합니다.
 
 ### 사전 요구사항
 
@@ -81,9 +84,7 @@ dotnet run
 
 ### 6. 프론트엔드 실행 (선택)
 
-`frontend/` 폴더에 별도의 Vue 3 + PrimeVue 프로젝트가 있습니다. 현재 마스터데이터 화면 API 연동완료.
-나머지 3개의 화면은 목 데이터(`frontend/src/mock`)로 채워져 있으며, 각 컴포넌트 상단의 `TODO(연동)` 주석에
-붙일 엔드포인트가 정리되어 있습니다.
+`frontend/` 폴더에 Vue 3 + PrimeVue 프로젝트가 있습니다. 화면 4개 모두 API 연동이 끝나 있어, 위 5번까지 진행해 백엔드를 띄운 상태에서 실행하면 실제 데이터로 동작합니다.
 
 ```bash
 cd frontend
@@ -91,7 +92,7 @@ npm install
 npm run dev
 ```
 
-`http://localhost:5173` 에서 확인할 수 있습니다.
+`http://localhost:5173` 에서 확인할 수 있습니다. Vite dev 서버가 `/api` 요청을 백엔드(`http://localhost:5201`)로 프록시합니다.
 
 ## 도메인 모델 (ERD)
 
@@ -135,19 +136,20 @@ LineProcess, WorkerProcess는 복합키로 관리
 계획정지   = Σ(WorkLogPause 중 category=PLANNED)     // 식사, 정기점검 등
 비가동     = Σ(WorkLogPause 중 category=UNPLANNED)   // 고장, 자재대기 등
 부하시간   = 조업시간 - 계획정지
-가동시간 = 가동시간 - 비가동
+가동시간   = 부하시간 - 비가동
 
-가동률(%) = Σ가동시간 / 부하시간 × 100
+가동률(%) = Σ가동시간 / Σ부하시간 × 100
 ```
+
+계획정지(식사·정기점검)를 분모에서 빼는 이유는, 애초에 가동할 계획이 없던 시간까지 분모에 넣으면 정지 사유를 성실히 기록할수록 수치가 나빠지기 때문입니다.
 
 
 ### 서버 검증 규칙
 
 - 모든 시각은 미래일 수 없음
-- `pausedAt > 직전 시작/재개 시각` (정지 구간 겹침 방지)
-- `resumedAt > pausedAt`
-- `endTime > 마지막 기록 시각` (일시정지 중이면 `pausedAt`, 아니면 `startTime`)
-- 위반 시 409 Conflict + 에러 메시지 응답
+- `resumedAt > pausedAt` — 정지 구간 자신의 길이가 0/음수가 되는 것을 막음
+- `pausedAt >= 직전 시작/재개 시각`, `endTime >= 마지막 기록 시각` — **"이전"만 거부하고 "같음"은 허용**. 처음엔 같음도 막았으나, "식사 끝나자마자 곧바로 설비고장 정지", "고장 수리 후 재개하자마자 종료" 같은 정상 시나리오가 전부 거부되는 문제가 있어 완화했습니다. 두 정지 사이 가동시간이 0분이어도 계산식은 깨지지 않습니다(정지 구간을 빼는 구조라 0만큼 덜 빠질 뿐)
+- 위반 시 **400 Bad Request**(보낸 값 자체가 잘못됨) / **409 Conflict**(값은 정상이나 현재 상태와 충돌)로 구분해 응답. RFC 7807 `ProblemDetails` 형식
 - **작업 상태 전이 가드**: `Pause`는 `IN_PROGRESS`, `Resume`은 `PAUSED`, `Complete`는 `IN_PROGRESS`일 때만 허용. `Start`는 정적 팩토리(`WorkLog.Start(...)`)라 "시작 전 상태" 자체가 존재하지 않아 별도 가드가 필요 없음
 - **작업자 중복 시작 방지**: 이미 활성(`IN_PROGRESS`/`PAUSED`) 건이 있는 작업자는 새로 시작 불가
 
@@ -169,32 +171,35 @@ LineProcess, WorkerProcess는 복합키로 관리
 
 ## API 엔드포인트
 
-✅ 구현 완료 / ⬜ 설계 완료(미구현)
+전부 구현 완료이며, 프론트엔드 4개 화면에 모두 연동돼 있습니다.
 
-| | Method | Path | 설명 |
-|---|---|---|---|
-| ✅ | GET/POST/PUT/DELETE | `/api/lines?includeInactive=` | 라인 CRUD |
-| ✅ | GET/POST/PUT/DELETE | `/api/processes?includeInactive=` | 공정 CRUD (소속 라인 N:M, lineIds 배열로 응답) |
-| ✅ | GET/POST/PUT/DELETE | `/api/workers?processId=&includeInactive=` | 작업자 CRUD (소속 공정 N:M, processIds 배열로 응답) |
-| ✅ | GET/POST/PUT/DELETE | `/api/equipments?includeInactive=` | 설비 CRUD |
-| ✅ | GET | `/api/pause-reasons` | 정지사유 목록 |
-| ✅ | GET | `/api/work-orders/open?processId=` | 이어하기용 미완료 작업지시 |
-| ✅ | PUT | `/api/work-orders/{id}` | 라인/공정/설비 오선택 정정, targetQty 오선택 포함(targetQty 수정시 actualQty가 수정한값에 도달하면 완료처리) |
-| ✅ | POST | `/api/work-logs/start` | `{workerId, startTime, workOrderId}` 또는 신규 생성 |
-| ✅ | POST | `/api/work-logs/{id}/pause` | `{pausedAt, pauseReasonId}` |
-| ✅ | POST | `/api/work-logs/{id}/resume` | `{resumedAt}` |
-| ✅ | POST | `/api/work-logs/{id}/complete` | `{endTime, actualQty}` |
-| ✅ | DELETE | `/api/work-logs/{id}` | 오입력 이력 삭제 |
-| ⬜ | GET | `/api/work-logs/{id}` | 상세 조회 |
-| ⬜ | GET | `/api/work-logs/efficiency?period=&date=&groupBy=` | 대시보드 가동률 |
+| Method | Path | 설명 |
+|---|---|---|
+| GET/POST/PUT/DELETE | `/api/lines?includeInactive=` | 라인 CRUD |
+| GET/POST/PUT/DELETE | `/api/processes?includeInactive=` | 공정 CRUD (소속 라인 N:M, `lineIds` 배열로 응답) |
+| GET/POST/PUT/DELETE | `/api/workers?includeInactive=` | 작업자 CRUD (소속 공정 N:M, `processIds` 배열로 응답) |
+| GET/POST/PUT/DELETE | `/api/equipments?includeInactive=` | 설비 CRUD |
+| GET | `/api/pause-reasons` | 정지사유 목록 |
+| GET | `/api/work-orders/open?workerId=` | 이어하기용 미완료 작업지시 |
+| POST | `/api/work-logs/start` | `{workerId, startTime, equipmentId, workOrderId}`(이어하기) 또는 `{..., lineId, processId, targetQty}`(신규 생성) |
+| GET | `/api/work-logs/active?workerId=` | 그 작업자의 진행중/정지중 건. 없으면 204 |
+| POST | `/api/work-logs/{id}/pause` | `{pausedAt, pauseReasonId}` |
+| POST | `/api/work-logs/{id}/resume` | `{resumedAt}` |
+| POST | `/api/work-logs/{id}/complete` | `{endTime, actualQty}` |
+| DELETE | `/api/work-logs/{id}` | 오입력·방치 이력 삭제 |
+| GET | `/api/work-logs?startDate=&endDate=` | 기간별 작업이력 목록 (상세조회 화면) |
+| GET | `/api/work-logs/by-order/{workOrderId}` | 한 작업지시에 딸린 세션 전체 |
+| GET | `/api/work-logs/effectiveness?period=&date=&groupBy=` | 대시보드 가동률 집계 (Dapper) |
+
+> `PUT /api/work-orders/{id}`(라인·공정·목표수량 정정)는 설계·구현까지 했으나 **끝내 어느 화면에서도 호출하지 않아 제거**했습니다. 라인→공정 캐스케이딩 셀렉트가 오선택을 대부분 막아줘서 정정 경로가 실제로 필요하지 않았습니다.
 
 ## 화면 구성
 
-UI/UX는 구현 완료. 마스터데이터 화면은 API 연동 완료, 나머지 3개 화면은 아직 목 데이터 기준입니다. 소스는 `frontend/src/components/`.
+4개 화면 모두 UI/UX 구현 + API 연동 완료입니다(목 데이터는 전부 제거). 소스는 `frontend/src/components/`.
 
-1. **현장 작업 화면** (`WorkerDashboard.vue`): **작업자 선택이 먼저** — 그 작업자의 활성 건이 있으면 진행중 카드(정지/재개/완료/삭제), 없으면 시작 폼. 이어하기 체크박스(끄면 라인→공정 캐스케이딩 셀렉트로 신규 생성, 켜면 미완료 작업지시 카드에서 선택). 시각은 10분 단위 선택 + 미래 시각 차단. 완료는 시각 확정 → 실적수량 입력 2단계. 목표/누적/잔여 수량 표시
-2. **대시보드** (`Dashboard.vue`): 기간(일/월/연) × 그룹(작업자/공정/라인/설비) 가동률 그래프. 공정·라인은 세로 막대, 작업자·설비는 가로 막대 + 스크롤. CSS 기반 막대라 별도 차트 라이브러리 없음
-3. **상세 조회** (`DetailView.vue`): 날짜별 작업이력 목록(카드) → 선택 시 상세. 완료 건만 시간 분해(조업/가동/실가동 누적 막대 + 계산식) 표시, 진행중 건은 경과 시간만. 작업지시(라인/공정/설비) 수정 가능 — 같은 작업지시를 여러 명이 수행 중이면 확인 팝업 후 저장
+1. **현장 작업 화면** (`WorkerDashboard.vue`): **작업자 선택이 먼저** — 그 작업자의 활성 건이 있으면 진행중 카드(정지/재개/완료/삭제), 없으면 시작 폼. 이어하기 체크박스(끄면 라인→공정 캐스케이딩 셀렉트로 신규 생성, 켜면 미완료 작업지시 카드에서 선택). 라인·공정 후보는 **그 작업자가 배정된 조합만** 노출. 시각은 10분 단위 선택 + 미래 시각 차단. 완료는 시각 확정 → 실적수량 입력 2단계. 목표/누적/잔여 수량 표시
+2. **대시보드** (`Dashboard.vue`): 기간(일/월/연) × 그룹(작업자/공정/라인/설비) 가동률 그래프. 공정·라인은 세로 막대, 작업자·설비는 가로 막대 + 스크롤. CSS 기반 막대라 별도 차트 라이브러리 없음. 완료 건뿐 아니라 **진행중 건도 조회 시점 기준으로 실시간 합산**
+3. **상세 조회** (`DetailView.vue`): 기간(범위) 선택 → 작업지시 단위 대표 목록(표, 페이지네이션·정렬·검색) → 행 선택 시 하단에 작업지시 헤더 + 그 작업지시의 세션 카드 전부. 완료 건만 시간 분해(조업/부하/가동 누적 막대 + 계산식) 표시, 진행중 건은 경과 시간만. 세션 단위 삭제 가능
 4. **마스터데이터 관리** (`MasterData.vue`): `[라인|공정|작업자|설비]` 탭, DataTable + Dialog CRUD. 공정/작업자 탭은 N:M 관계를 MultiSelect로 편집. 비활성 항목은 기본적으로 숨기고 토글로 복구 가능
 
 ## 프로젝트 구조
@@ -213,12 +218,13 @@ MesWorklog/
 - 백엔드
   - 도메인 모델 / 데이터 계층(EF Core, 마이그레이션): 완료
   - 전역 예외 처리(`IExceptionHandler` → ProblemDetails): 완료
-  - 라인 CRUD API: 완료 (Swagger 검증 완료 — 400/201/409/404 전부 확인)
-  - 공정 / 작업자 / 설비 CRUD: 완료(프론트엔드 연동 후 테스트 완료)
-  - 작업이력(시작·정지·재개·완료) API: 완료
-  - Dapper 기반 대시보드 집계: 예정
-- 테스트: `WorkLog` 상태 전이·OEE 시간 분해 단위테스트 11건 (`dotnet test`)
-- 프론트엔드: 화면 4개 UI/UX 구현 완료(목 데이터 기준), 마스터데이터 화면 API 연동 완료, 나머지 3개 화면 연동 예정
+  - 마스터데이터 CRUD 4종(라인 / 공정 / 작업자 / 설비): 완료
+  - 작업이력(시작·정지·재개·완료·삭제·조회) API: 완료
+  - Dapper 기반 대시보드 집계(`EffectivenessService`): 완료
+- 테스트: `WorkLog` 상태 전이·OEE 시간 분해 단위테스트 13건 (`dotnet test`)
+- 프론트엔드: 화면 4개 전부 UI/UX + API 연동 완료
+- 검증: 3개월치 시드 데이터로 대시보드 4개 그룹 기준 집계 확인, 시작→정지→재개→완료 전체 흐름 브라우저 검증 완료
+
 
 ## AI 도구 활용
 

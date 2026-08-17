@@ -1,30 +1,37 @@
-# 디버그 컨테이너를 사용자 지정하는 방법과 Visual Studio 이 Dockerfile을 사용하여 더 빠른 디버깅을 위해 이미지를 빌드하는 방법을 알아보려면 https://aka.ms/customizecontainer를 참조하세요.
+# ── 1. 프론트엔드 빌드 (Node) ─────────────────────────────
+# Vite 8은 Node 20.19+ 를 요구하므로 22를 쓴다
+FROM node:22-alpine AS frontend
+WORKDIR /src/frontend
 
-# 이 스테이지는 VS에서 빠른 모드로 실행할 때 사용됩니다(디버그 구성의 기본값).
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
-USER $APP_UID
-WORKDIR /app
-EXPOSE 8080
-EXPOSE 8081
+# package.json/lock만 먼저 복사해 npm ci 레이어를 캐싱한다.
+# 소스만 고쳤을 때 의존성 재설치를 건너뛰어 빌드가 빨라진다
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 
+COPY frontend/ ./
+RUN npm run build          # → /src/frontend/dist
 
-# 이 스테이지는 서비스 프로젝트를 빌드하는 데 사용됩니다.
+# ── 2. 백엔드 빌드 (.NET SDK) ─────────────────────────────
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
+
 COPY ["MesWorklog/MesWorklog.csproj", "MesWorklog/"]
 RUN dotnet restore "./MesWorklog/MesWorklog.csproj"
+
 COPY . .
 WORKDIR "/src/MesWorklog"
-RUN dotnet build "./MesWorklog.csproj" -c $BUILD_CONFIGURATION -o /app/build
+RUN dotnet publish "./MesWorklog.csproj" \
+    -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
-# 이 스테이지는 최종 스테이지에 복사할 서비스 프로젝트를 게시하는 데 사용됩니다.
-FROM build AS publish
-ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./MesWorklog.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
-
-# 이 스테이지는 프로덕션에서 사용되거나 VS에서 일반 모드로 실행할 때 사용됩니다(디버그 구성을 사용하지 않는 경우 기본값).
-FROM base AS final
+# ── 3. 실행 이미지 ────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
-COPY --from=publish /app/publish .
+EXPOSE 8080
+
+COPY --from=build /app/publish .
+# 프론트 빌드 결과를 정적 파일 루트로 — 한 컨테이너에서 같이 서빙된다
+COPY --from=frontend /src/frontend/dist ./wwwroot
+
+USER $APP_UID
 ENTRYPOINT ["dotnet", "MesWorklog.dll"]

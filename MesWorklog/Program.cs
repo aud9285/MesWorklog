@@ -40,6 +40,14 @@ builder.Services.AddScoped<IDbConnection>(_ => new MySqlConnection(connectionStr
 
 var app = builder.Build();
 
+// 컨테이너는 EF 마이그레이션을 자동으로 돌리지 않는다.
+// 배포 환경의 빈 DB에 스키마를 맞춰주기 위해 시작 시 한 번 실행한다.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
+
 // 미들웨어는 맨 앞에둬야 먼저 실행됨
 app.UseExceptionHandler();
 
@@ -60,8 +68,18 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+// Vue 빌드 결과(wwwroot)를 서빙한다.
+// UseDefaultFiles가 "/" 요청을 index.html로 바꿔주고, UseStaticFiles가 실제 파일을 내보낸다.
+// 순서가 중요 — UseDefaultFiles가 반드시 UseStaticFiles보다 먼저
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseAuthorization();
 
 app.MapControllers();
+
+// 컨트롤러가 처리하지 못한 요청(= Vue 라우팅 경로)을 index.html로 보낸다.
+// 반드시 MapControllers 뒤에 와야 한다 — 앞에 두면 /api 요청까지 삼켜버린다
+app.MapFallbackToFile("index.html");
 
 app.Run();
