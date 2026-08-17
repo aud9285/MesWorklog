@@ -12,48 +12,51 @@ ORM : Entity Framework Core + Pomelo.EntityFrameworkCore.MySql
       Dapper + EFCore.NamingConventions
 DB : MySQL
 
+## 데모
+
+**http://43.201.89.32** — AWS EC2에 Docker Compose로 배포(앱+MySQL 컨테이너). 3개월치 시드 데이터가 들어있어 대시보드·상세조회에서 실제 데이터로 확인할 수 있습니다.
+
 ## 실행 화면
 
 -- 개발중
 
 ## 실행 방법
 
-## 테스트
+### Docker로 실행
+
+컨테이너 하나(웹)+하나(MySQL)로 전체가 뜹니다. 실제 데모 배포에도 이 구성을 그대로 씁니다.
 
 ```bash
-dotnet test
+git clone https://github.com/aud9285/MesWorklog.git
+cd MesWorklog
+echo "MYSQL_ROOT_PASSWORD=원하는_비밀번호" > .env
+docker compose up --build
 ```
 
-`WorkLog`의 상태 전이 가드와 OEE 시간 분해를 검증하는 단위테스트 13건이 있습니다.
-DB나 웹 서버 없이 실행되며, 아래 항목들을 고정합니다.
+`http://localhost` 에서 확인할 수 있습니다(80번 포트가 이미 쓰이고 있다면 `.env`에 `APP_PORT=8080` 같은 값을 추가해서 바꿀 수 있습니다). 최초 실행 시 스키마 마이그레이션이 자동으로 적용되지만, 마스터데이터·작업이력은 비어있는 상태로 시작합니다.
 
-- 정지 중에는 완료 불가 — 가동률이 100%로 부풀려지던 버그 방지
-- 연속 정지 불가 — 열린 정지가 여러 개 생겨 시간 계산이 커지던 문제 방지
-- 모든 시각 입력의 미래 시각 거부
-- 계획정지/비가동이 각각 차감되는지 (조업 180분 → 부하 150분 → 가동 130분)
-- **정지·종료 시각이 직전 재개 시각과 "같은" 경우 허용** — "식사 끝나자마자 곧바로 설비고장", "고장 고치고 재개하자마자 퇴근" 같은 정상 시나리오가 막히던 버그의 회귀 방지
+### 직접 실행
 
-DB 없이 시간 경계값을 검증할 수 있는 건 모든 상태 전이 메서드가 기준시각(`now`)을 파라미터로 주입받도록 설계했기 때문입니다. 같은 경계를 브라우저로 확인하려면 실제 시계가 10분 단위 경계를 넘길 때까지 기다려야 합니다.
-
-### 사전 요구사항
+#### 사전 요구사항
 
 - .NET 10 SDK
-- MySQL 서버 (또는 Docker로 MySQL 컨테이너 실행)
+- Node.js 20.19+ (프론트엔드 실행 시)
+- MySQL 서버 (또는 위 Docker 방식으로 MySQL만 따로 띄워도 됨)
 
-### 1. 리포지토리 클론
+#### 1. 리포지토리 클론
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/aud9285/MesWorklog.git
 cd MesWorklog
 ```
 
-### 2. MySQL 준비 (Docker 사용 시 예시)
+#### 2. MySQL 준비 (Docker 사용 시 예시)
 
 ```bash
 docker run --name mes-mysql -e MYSQL_ROOT_PASSWORD=1234 -e MYSQL_DATABASE=mes -p 3306:3306 -d mysql:8
 ```
 
-### 3. DB 연결 문자열 설정
+#### 3. DB 연결 문자열 설정
 
 `MesWorklog` 프로젝트 폴더에서 `dotnet user-secrets`로 로컬 전용 연결 문자열을 등록합니다 (비밀번호가 git에 올라가지 않도록).
 
@@ -62,14 +65,14 @@ cd MesWorklog
 dotnet user-secrets set "ConnectionStrings:MesDb" "Server=localhost;Port=3306;Database=mes;User=root;Password=1234;"
 ```
 
-### 4. 패키지 복원 및 마이그레이션 적용
+#### 4. 패키지 복원 및 마이그레이션 적용
 
 ```bash
 dotnet restore
 dotnet ef database update
 ```
 
-### 5. 실행
+#### 5. 실행
 
 ```bash
 dotnet run
@@ -82,7 +85,7 @@ dotnet run
 - API: `https://localhost:7268` (또는 `http://localhost:5201`)
 - Swagger UI: `https://localhost:7268/swagger`
 
-### 6. 프론트엔드 실행 (선택)
+#### 6. 프론트엔드 실행 (선택)
 
 `frontend/` 폴더에 Vue 3 + PrimeVue 프로젝트가 있습니다. 화면 4개 모두 API 연동이 끝나 있어, 위 5번까지 진행해 백엔드를 띄운 상태에서 실행하면 실제 데이터로 동작합니다.
 
@@ -93,6 +96,23 @@ npm run dev
 ```
 
 `http://localhost:5173` 에서 확인할 수 있습니다. Vite dev 서버가 `/api` 요청을 백엔드(`http://localhost:5201`)로 프록시합니다.
+
+## 테스트
+
+```bash
+dotnet test
+```
+
+`WorkLog`의 상태 전이 예외처리와 OEE 시간 분해를 검증하는 단위테스트 13건이 있습니다.
+DB나 웹 서버 없이 실행되며, 아래 항목들을 고정합니다.
+
+- 정지 중에는 완료 불가 
+- 연속 정지 불가 — 정지가 여러 개 생겨 시간 계산이 커지던 문제 방지
+- 모든 시각 입력의 미래 시각 거부
+- 계획정지/비가동이 각각 차감되는지 (조업 180분 → 부하 150분 → 가동 130분)
+- **정지·종료 시각이 직전 재개 시각과 "같은" 경우 허용** 
+
+DB 없이 시간 경계값을 검증할 수 있는 건 모든 상태 전이 메서드가 기준시각(`now`)을 파라미터로 주입받도록 설계했기 때문입니다.
 
 ## 도메인 모델 (ERD)
 
