@@ -86,7 +86,7 @@ namespace MesWorklog.Models
                 .DefaultIfEmpty(StartTime)
                 .Max();
 
-            if (pausedAt <= lastResumedAt)
+            if (pausedAt < lastResumedAt)
                 throw new InvalidTimeInputException("정지 시각은 직전 시작/재개 시각보다 이후여야 합니다.");
 
 
@@ -107,7 +107,7 @@ namespace MesWorklog.Models
 
             // 기능: PAUSED 상태인데 열린 정지가 없으면 데이터 모순이므로 방어적으로 예외
             var openPause = Pauses.FirstOrDefault(p => p.ResumedAt == null)
-                ?? throw new InvalidWorkLogStateException("정지 중인데 열린 정지 이력을 찾을 수 없습니다.");
+                ?? throw new InvalidWorkLogStateException("정지 중인데 현재 정지 이력을 찾을 수 없습니다.");
 
             if (resumedAt <= openPause.PausedAt)
                 throw new InvalidTimeInputException("재개 시각은 정지 시각보다 이후여야 합니다.");
@@ -131,7 +131,7 @@ namespace MesWorklog.Models
                 .DefaultIfEmpty(StartTime)
                 .Max();
 
-            if (endTime <= lastRecordedAt)
+            if (endTime < lastRecordedAt)
                 throw new InvalidTimeInputException("종료 시각은 마지막 시작/재개 시각보다 이후여야 합니다.");
 
             EndTime = endTime;

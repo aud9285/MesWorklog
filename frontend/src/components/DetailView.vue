@@ -537,14 +537,16 @@ async function confirmDeleteLog() {
                   </template>
                 </Column>
 
-                <Column header="정지" style="width: 90px">
-                  <template #body="{ data }"><span class="num">{{ hhmm(data.pausedAt) }}</span></template>
+                <!-- 시각만 보여주면 자정을 넘긴 야간 정지(예: 재개 00:10)가 어느 날인지 헷갈려서
+                     날짜까지 함께 보여준다(mmddhhmm) -->
+                <Column header="정지" style="width: 120px">
+                  <template #body="{ data }"><span class="num">{{ mmddhhmm(data.pausedAt) }}</span></template>
                 </Column>
 
-                <Column header="재개" style="width: 100px">
+                <Column header="재개" style="width: 130px">
                   <template #body="{ data }">
                     <!-- 재개되지 않은 "열린 정지" — 현재 정지 중이라는 뜻 -->
-                    <span v-if="data.resumedAt" class="num">{{ hhmm(data.resumedAt) }}</span>
+                    <span v-if="data.resumedAt" class="num">{{ mmddhhmm(data.resumedAt) }}</span>
                     <span v-else class="open-pause">정지 중</span>
                   </template>
                 </Column>

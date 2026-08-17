@@ -609,7 +609,9 @@ async function confirmDelete() {
             <span>
               <strong>{{ openPause.reasonName }}</strong>
               ({{ CATEGORY_LABEL[openPause.category] }}) 사유로
-              {{ hhmm(openPause.pausedAt) }}부터 정지 중입니다.
+              <!-- 자정을 넘긴 야간 근무일 수 있어 시각만이 아니라 날짜까지 항상 보여준다(mmddhhmm) —
+                   상세조회 화면의 정지 이력과 동일한 표기로 통일 -->
+              {{ mmddhhmm(openPause.pausedAt) }}부터 정지 중입니다.
             </span>
           </div>
 
@@ -620,8 +622,9 @@ async function confirmDelete() {
               <span class="dot" :class="p.category === 'Planned' ? 'planned' : 'unplanned'" />
               <span class="pause-name">{{ p.reasonName }}</span>
               <span class="pause-cat">{{ CATEGORY_LABEL[p.category] }}</span>
+              <!-- 항상 "MM-DD HH:MM"으로 날짜까지 표시 — 상세조회 화면과 동일한 표기 -->
               <span class="pause-time num">
-                {{ hhmm(p.pausedAt) }} ~ {{ p.resumedAt ? hhmm(p.resumedAt) : '진행 중' }}
+                {{ mmddhhmm(p.pausedAt) }} ~ {{ p.resumedAt ? mmddhhmm(p.resumedAt) : '진행 중' }}
               </span>
               <span class="pause-dur num">
                 {{ p.resumedAt ? duration(minutesBetween(p.pausedAt, p.resumedAt)) : '-' }}
@@ -854,7 +857,8 @@ async function confirmDelete() {
 /* ── 정지 이력 행 ── */
 .pause-row {
   display: grid;
-  grid-template-columns: 10px 1fr 62px 130px 74px;
+  /* 자정을 넘긴 정지는 시각 칸에 날짜까지("08-18 22:30 ~ 08-19 00:10") 들어갈 수 있어 넉넉히 잡는다 */
+  grid-template-columns: 10px 1fr 62px 190px 74px;
   align-items: center;
   gap: 10px;
   padding: 7px 10px;
