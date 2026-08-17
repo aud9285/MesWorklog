@@ -158,4 +158,34 @@ public class WorkLogTests
         Assert.Equal(130, log.NetOperatingMinutes);   // 실가동 = 150 - 20(비가동)
         // → 가동률 130/180 = 72.2%. 정지를 기록할수록 수치가 내려가는 게 정상 동작이다
     }
+
+    [Fact]
+    public void 정지_시각이_직전_재개_시각과_같아도_허용된다()
+    {
+        // 정지가 곧바로 이어지는 건 정상 시나리오라, 재개와 같은 시각이어도 통과해야 한다
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
+        log.Pause(At(10), Reason(), Now);
+        log.Resume(At(11), Now);
+
+        log.Pause(At(11), Reason(PauseCategory.Unplanned), Now);   // 재개(11:00)와 같은 시각
+
+        Assert.Equal(WorkLogStatus.Paused, log.Status);
+        Assert.Equal(2, log.Pauses.Count);
+    }
+
+    [Fact]
+    public void 종료_시각이_마지막_기록_시각과_같아도_허용된다()
+    {
+        var log = WorkLog.Start(1, 1, null, At(9), Now);
+        log.Pause(At(10), Reason(PauseCategory.Unplanned), Now);
+        log.Resume(At(10, 20), Now);
+
+        log.Complete(endTime: At(10, 20), actualQty: 5, now: Now);   // 재개(10:20)와 같은 시각
+
+        Assert.Equal(WorkLogStatus.Completed, log.Status);
+        // 재개~종료 간격이 0분이라 비가동만 빠진 나머지가 그대로 가동시간
+        Assert.Equal(80, log.ElapsedMinutes);        // 09:00~10:20
+        Assert.Equal(80, log.OperatingMinutes);       // 계획정지 없음
+        Assert.Equal(60, log.NetOperatingMinutes);    // 80 - 20(비가동)
+    }
 }
