@@ -18,7 +18,21 @@ DB : MySQL
 
 ## 실행 화면
 
--- 개발중
+#### 1. 작업 시작/중지/완료
+<img width="1178" height="727" alt="Image" src="/MesWorklog/docs/1.png" />
+<img width="1178" height="727" alt="Image" src="/MesWorklog/docs/4.png" />
+<img width="1178" height="727" alt="Image" src="/MesWorklog/docs/5.png" />
+
+#### 2. 작업 시간에 따른 시간 가동률
+<img width="1178" height="727" alt="Image" src="/MesWorklog/docs/6.png" />
+<img width="1178" height="727" alt="Image" src="/MesWorklog/docs/7.png" />
+<img width="1178" height="727" alt="Image" src="/MesWorklog/docs/8.png" />
+
+
+
+
+
+
 
 ## 실행 방법
 
